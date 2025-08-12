@@ -264,12 +264,20 @@ export function HeadlessImportPage() {
     };
 
     try {
-        const response = await fetch('/api/headless-get-config');
-        const currentConfig: HeadlessProject[] = await response.json();
+        let currentConfig: HeadlessProject[] = [];
+        try {
+            const response = await fetch('/api/headless-get-config');
+            if (response.ok) {
+                currentConfig = await response.json();
+            }
+        } catch (e) {
+            console.error("Could not fetch initial config, starting with an empty list.", e);
+        }
+
         let updatedConfig: HeadlessProject[];
 
         if (dialogMode === 'edit') {
-            updatedConfig = currentConfig.map(p => p.siteId === originalSiteId ? projectData : p);
+            updatedConfig = currentConfig.map(p => (p.siteId === originalSiteId ? projectData : p));
         } else {
             if (currentConfig.some(p => p.siteId === siteId)) {
                 toast({ title: "Duplicate Site ID", description: "A project with this Site ID already exists.", variant: "destructive" });
