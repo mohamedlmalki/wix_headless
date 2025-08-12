@@ -22,7 +22,6 @@ interface CampaignRecipient {
   fullName?: string;
 }
 
-// ★★★ ADD: Define the shape of the summary statistics ★★★
 interface CampaignSummaryStats {
     delivered: number;
     opened: number;
@@ -30,6 +29,15 @@ interface CampaignSummaryStats {
     bounced: number;
     complained: number;
     notSent: number;
+}
+
+// ★★★ NEW: Export the state shape so App.tsx can use it ★★★
+export interface CampaignStatsState {
+    selectedProject: HeadlessProject | null;
+    selectedCampaignId: string;
+    selectedActivity: string;
+    recipients: CampaignRecipient[];
+    summaryStats: CampaignSummaryStats | null;
 }
 
 const activityTypes = [
@@ -60,19 +68,19 @@ const exportEmailsToTxt = (data: any[], filename: string) => {
     }
 };
 
-const CampaignStatsPage = () => {
+// ★★★ UPDATE: The component now receives its state via props ★★★
+interface CampaignStatsPageProps {
+  statsState: CampaignStatsState;
+  onStatsStateChange: (updates: Partial<CampaignStatsState>) => void;
+}
+
+const CampaignStatsPage = ({ statsState, onStatsStateChange }: CampaignStatsPageProps) => {
+  const { selectedProject, selectedCampaignId, selectedActivity, recipients, summaryStats } = statsState;
+
   const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
-  const [selectedProject, setSelectedProject] = useState<HeadlessProject | null>(null);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
-  const [selectedActivity, setSelectedActivity] = useState<string>('');
-  const [recipients, setRecipients] = useState<CampaignRecipient[]>([]);
   const [isFetching, setIsFetching] = useState(false);
-  const { toast } = useToast();
-
-  // ★★★ ADD: New state for summary statistics ★★★
-  const [summaryStats, setSummaryStats] = useState<CampaignSummaryStats | null>(null);
   const [isFetchingSummary, setIsFetchingSummary] = useState(false);
-
+  const { toast } = useToast();
 
   useEffect(() => {
     const fetchProjects = async () => {
@@ -81,8 +89,9 @@ const CampaignStatsPage = () => {
         if (response.ok) {
           const projects = await response.json();
           setHeadlessProjects(projects);
-          if (projects.length > 0) {
-            setSelectedProject(projects[0]);
+          // Set initial project only if it's not already set in the global state
+          if (projects.length > 0 && !selectedProject) {
+            onStatsStateChange({ selectedProject: projects[0] });
           }
         }
       } catch (error) {
@@ -90,12 +99,12 @@ const CampaignStatsPage = () => {
       }
     };
     fetchProjects();
-  }, [toast]);
+    // Intentionally run only once on mount, or when selectedProject is not yet set
+  }, [!selectedProject]);
 
-  // ★★★ ADD: New function to fetch only the summary stats ★★★
   const fetchSummaryStats = async (projectId: string, campaignId: string) => {
     setIsFetchingSummary(true);
-    setSummaryStats(null);
+    onStatsStateChange({ summaryStats: null }); // Clear previous stats
     try {
         const response = await fetch('/api/headless-get-stats', {
             method: 'POST',
@@ -105,9 +114,9 @@ const CampaignStatsPage = () => {
         if (!response.ok) throw new Error('Failed to fetch campaign summary.');
         const data = await response.json();
         if (data.statistics && data.statistics.length > 0) {
-            setSummaryStats(data.statistics[0].email);
+            onStatsStateChange({ summaryStats: data.statistics[0].email });
         } else {
-            setSummaryStats(null);
+            onStatsStateChange({ summaryStats: null });
         }
     } catch (error) {
         toast({ title: "Error Fetching Summary", description: (error as Error).message, variant: "destructive" });
@@ -116,7 +125,6 @@ const CampaignStatsPage = () => {
     }
   };
 
-
   const handleFetchRecipients = async () => {
     if (!selectedProject || !selectedCampaignId || !selectedActivity) {
       toast({ title: "Selection Required", description: "Please select a project, campaign, and activity type.", variant: "destructive" });
@@ -124,7 +132,7 @@ const CampaignStatsPage = () => {
     }
 
     setIsFetching(true);
-    setRecipients([]);
+    onStatsStateChange({ recipients: [] }); // Clear previous recipients
     try {
       const response = await fetch('/api/headless-get-recipients', {
         method: 'POST',
@@ -137,7 +145,7 @@ const CampaignStatsPage = () => {
       });
       if (!response.ok) throw new Error(`Failed to fetch ${selectedActivity.toLowerCase()} recipients.`);
       const data = await response.json();
-      setRecipients(data.recipients || []);
+      onStatsStateChange({ recipients: data.recipients || [] });
     } catch (error) {
       toast({ title: "Error Fetching Recipients", description: (error as Error).message, variant: "destructive" });
     } finally {
@@ -160,7 +168,6 @@ const CampaignStatsPage = () => {
             </div>
           </div>
           
-          {/* ★★★ NEW: Display summary stats here ★★★ */}
           {selectedCampaignId && (
             <Card className="bg-gradient-card shadow-card border-primary/10">
               <CardHeader>
@@ -195,11 +202,14 @@ const CampaignStatsPage = () => {
                   value={selectedProject?.siteId || ''}
                   onValueChange={(siteId) => {
                     const project = headlessProjects.find(p => p.siteId === siteId) || null;
-                    setSelectedProject(project);
-                    setSelectedCampaignId('');
-                    setSelectedActivity('');
-                    setRecipients([]);
-                    setSummaryStats(null);
+                    // Reset everything when project changes
+                    onStatsStateChange({ 
+                        selectedProject: project,
+                        selectedCampaignId: '',
+                        selectedActivity: '',
+                        recipients: [],
+                        summaryStats: null,
+                    });
                   }}
                 >
                   <SelectTrigger><SelectValue placeholder="Select a project..." /></SelectTrigger>
@@ -213,11 +223,11 @@ const CampaignStatsPage = () => {
                 <Select
                   value={selectedCampaignId}
                   onValueChange={(campaignId) => {
-                      setSelectedCampaignId(campaignId);
+                      onStatsStateChange({ selectedCampaignId: campaignId });
                       if (selectedProject && campaignId) {
                           fetchSummaryStats(selectedProject.siteId, campaignId);
                       } else {
-                          setSummaryStats(null);
+                          onStatsStateChange({ summaryStats: null });
                       }
                   }}
                   disabled={!selectedProject || availableCampaigns.length === 0}
@@ -232,7 +242,7 @@ const CampaignStatsPage = () => {
 
                 <Select
                   value={selectedActivity}
-                  onValueChange={setSelectedActivity}
+                  onValueChange={(activity) => onStatsStateChange({ selectedActivity: activity })}
                   disabled={!selectedCampaignId}
                 >
                   <SelectTrigger><SelectValue placeholder="Select activity type..." /></SelectTrigger>
@@ -303,7 +313,6 @@ const CampaignStatsPage = () => {
   );
 };
 
-// ★★★ ADD: A small component for the summary stats ★★★
 const SummaryStat = ({ icon: Icon, title, value }: { icon: React.ElementType, title: string, value: number }) => (
     <div className="flex flex-col items-center gap-1 p-2 rounded-md">
         <Icon className="h-5 w-5 text-muted-foreground" />
