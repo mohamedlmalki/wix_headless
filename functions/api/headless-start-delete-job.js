@@ -27,7 +27,7 @@ async function pollWixJobStatus(jobId, project) {
   let job, jobStatus = 'IN_PROGRESS';
 
   while (jobStatus === 'IN_PROGRESS' || jobStatus === 'ACCEPTED') {
-    await delay(3000);
+    await delay(3000); // Wait 3 seconds before checking status
     
     const response = await fetch(wixApiUrl, {
       method: 'GET',
@@ -36,7 +36,7 @@ async function pollWixJobStatus(jobId, project) {
     
     if (response.status === 404) {
         console.log(`Job ${jobId} finished and was not found (404), assuming completion.`);
-        return { status: 'COMPLETED' };
+        return { status: 'COMPLETED', result: { successful: -1 } }; // Use -1 to indicate assumed success
     }
     
     if (!response.ok) {
@@ -76,17 +76,16 @@ export async function onRequestPost(context) {
                 const totalSteps = memberIdChunks.length + contactEmailChunks.length;
                 let stepsCompleted = 0;
 
-                // --- STEP 1: Bulk Delete All Member Chunks using the FILTER method ---
+                // --- STEP 1: Bulk Delete All Member Chunks ---
                 for (let i = 0; i < memberIdChunks.length; i++) {
                     stepsCompleted++;
                     currentState = { status: 'running', processed: stepsCompleted, total: totalSteps, step: `Deleting member batch ${i + 1} of ${memberIdChunks.length}` };
                     await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
                     
-                    const chunk = memberIdChunks[i];
                     const memberDeleteRes = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete-by-filter', {
                         method: 'POST',
                         headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ filter: { "_id": { "$in": chunk } } })
+                        body: JSON.stringify({ filter: { "_id": { "$in": memberIdChunks[i] } } })
                     });
                     
                     if (!memberDeleteRes.ok) {
@@ -95,10 +94,10 @@ export async function onRequestPost(context) {
                     }
                 }
 
-                // ★ FIX: Increased delay to 3 seconds as requested
-                currentState = { ...currentState, step: `Finalizing member deletion... (waiting 3s)` };
+                // ★ FIX: Increased delay to 5 seconds for better reliability
+                currentState = { ...currentState, step: `Finalizing member deletion... (waiting 5s)` };
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
-                await delay(3000);
+                await delay(5000);
 
                 // --- STEP 2: Bulk Delete All Contact Chunks ---
                 for (let i = 0; i < contactEmailChunks.length; i++) {
@@ -120,9 +119,13 @@ export async function onRequestPost(context) {
                     const { jobId } = await contactDeleteRes.json();
                     const finalJob = await pollWixJobStatus(jobId, project);
 
+                    // ★ FIX: Check if the job actually deleted anyone
                     if (finalJob.status !== 'COMPLETED') {
                         const resultDetails = finalJob.result ? JSON.stringify(finalJob.result) : "No details available."
                         throw new Error(`Contact deletion job for batch ${i + 1} finished with status: ${finalJob.status}. Details: ${resultDetails}`);
+                    }
+                    if (finalJob.result && finalJob.result.successful === 0 && finalJob.result.successful !== -1) {
+                        throw new Error(`Contact deletion job for batch ${i + 1} completed but deleted 0 contacts. This is likely due to a timing issue or permissions. Please try again.`);
                     }
                 }
 
