@@ -1,3 +1,43 @@
+// This helper function will fetch all members, handling pagination automatically.
+async function fetchAllMembers(project) {
+  let allMembers = [];
+  let offset = 0;
+  const limit = 1000; // Wix API limit per request
+  let hasMore = true;
+
+  while (hasMore) {
+    const wixApiUrl = `https://www.wixapis.com/members/v1/members?paging.limit=${limit}&paging.offset=${offset}&fieldsets=FULL`;
+
+    const response = await fetch(wixApiUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': project.apiKey,
+        'wix-site-id': project.siteId,
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Wix API error while fetching members: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.members && data.members.length > 0) {
+      allMembers = allMembers.concat(data.members);
+      offset += data.members.length;
+    } else {
+      hasMore = false;
+    }
+
+    if (!data.metadata || allMembers.length >= data.metadata.total) {
+      hasMore = false;
+    }
+  }
+  return allMembers;
+}
+
+// This is the main function that responds to the frontend
 export async function onRequestPost({ request, env }) {
   try {
     const { siteId, campaignId, activity } = await request.json();
@@ -22,21 +62,34 @@ export async function onRequestPost({ request, env }) {
       });
     }
 
-    // This is the only line that has been changed
-    const wixApiUrl = `https://www.wixapis.com/email-marketing/v1/campaigns/${campaignId}/statistics/recipients?activity=${activity}&paging.limit=1000`;
+    // --- NEW LOGIC: Fetch both lists in parallel for speed ---
+    const [allMembers, recipientData] = await Promise.all([
+      fetchAllMembers(project),
+      fetch(`https://www.wixapis.com/email-marketing/v1/campaigns/${campaignId}/statistics/recipients?activity=${activity}&paging.limit=1000`, {
+        method: 'GET',
+        headers: {
+          'Authorization': project.apiKey,
+          'wix-site-id': project.siteId,
+        }
+      }).then(res => {
+        if (!res.ok) throw new Error('Failed to fetch campaign recipients.');
+        return res.json();
+      })
+    ]);
 
-    const wixResponse = await fetch(wixApiUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': project.apiKey,
-        'wix-site-id': project.siteId,
-      }
-    });
+    // --- NEW LOGIC: Create a fast lookup Set of current member emails ---
+    const currentMemberEmails = new Set(allMembers.map(member => member.loginEmail));
 
-    const data = await wixResponse.json();
+    // --- NEW LOGIC: Filter the recipients to only include current members ---
+    const activeRecipients = (recipientData.recipients || []).filter(recipient => 
+      currentMemberEmails.has(recipient.emailAddress)
+    );
 
-    return new Response(JSON.stringify(data), {
-      status: wixResponse.status,
+    // Replace the original recipients list with our filtered list
+    const finalData = { ...recipientData, recipients: activeRecipients };
+
+    return new Response(JSON.stringify(finalData), {
+      status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
 
