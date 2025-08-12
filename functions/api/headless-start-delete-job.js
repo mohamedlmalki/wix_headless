@@ -34,6 +34,12 @@ async function pollWixJobStatus(jobId, project) {
       headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
     });
     
+    // ★ FIX: If we get a 404, it means the job finished so fast it's already gone. Treat this as a success.
+    if (response.status === 404) {
+        console.log(`Job ${jobId} finished and was not found (404), assuming completion.`);
+        return { status: 'COMPLETED' };
+    }
+    
     if (!response.ok) {
         const errorDetails = await getErrorDetails(response);
         throw new Error(`Polling failed for job ${jobId}. API responded with status ${response.status}: ${errorDetails}`);
@@ -89,10 +95,10 @@ export async function onRequestPost(context) {
                     }
                 }
 
-                // ★ FIX: Add a 5-second delay to allow Wix servers to process member deletions
-                currentState = { ...currentState, step: `Finalizing member deletion... (waiting 5s)` };
+                // ★ FIX: Reduced delay to 1 second as requested
+                currentState = { ...currentState, step: `Finalizing member deletion... (waiting 1s)` };
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
-                await delay(5000);
+                await delay(1000);
 
                 // --- STEP 2: Bulk Delete All Contact Chunks ---
                 for (let i = 0; i < contactEmailChunks.length; i++) {
