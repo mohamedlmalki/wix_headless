@@ -15,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from '@/components/ui/progress';
 import { jobManager, JobState } from '../lib/JobManager';
-import { DeleteJobState } from '../../App';
+import { DeleteJobState } from '../../App'; 
 
 const exportEmailsToTxt = (data: any[], filename: string) => {
     const emailKeys = ['email', 'loginEmail', 'emailAddress'];
@@ -40,20 +40,6 @@ interface HeadlessProject { projectName: string; siteId: string; apiKey: string;
 interface Member { id: string; loginEmail: string; contactId: string; profile: { nickname: string; }; status?: string; }
 interface SenderDetails { fromName: string; fromEmail: string; }
 type CampaignField = { id: number; key: string; value: string; };
-
-const initialJobState: JobState = {
-    siteId: '',
-    emails: '',
-    results: [],
-    isLoading: false,
-    isPaused: false,
-    progress: 0,
-    countdown: 0,
-    delaySeconds: 1,
-    totalEmails: 0,
-    processedEmails: 0,
-    jobCancelled: false,
-};
 
 interface HeadlessImportPageProps {
   jobs: Record<string, JobState>;
@@ -135,9 +121,8 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
                 });
                 const data = await response.json();
 
-                // ★★★ UPDATE: Handle the new "stuck" status ★★★
                 if (data.status === 'stuck') {
-                    onDeleteJobStateChange({ isDeleteJobRunning: false }); // Stop polling
+                    onDeleteJobStateChange({ isDeleteJobRunning: false });
                     toast({ 
                         title: "Deletion Job Stuck", 
                         description: data.error || "The job has stopped due to an API error.", 
@@ -155,7 +140,7 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
                 }
             } catch (error) {
                 console.error("Failed to fetch delete job status:", error);
-                onDeleteJobStateChange({ isDeleteJobRunning: false }); // Stop polling on error
+                onDeleteJobStateChange({ isDeleteJobRunning: false });
             }
         }, 2000);
 
@@ -364,12 +349,12 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
     }, [selectedProject]);
     
     const handleImport = (siteId: string) => {
-        const job = jobs[siteId] || initialJobState;
+        const job = jobs[siteId] || { emails: '' };
         if (!job.emails) {
             toast({ title: "No Emails", description: "Please enter emails to import.", variant: "destructive" });
             return;
         }
-        jobManager.startJob(siteId, job.emails, job.delaySeconds);
+        jobManager.startJob(siteId, job.emails, job.delaySeconds ?? 1);
     };
     
     const handlePauseResume = (siteId: string) => {
@@ -464,12 +449,27 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
     };
 
     const handleDeleteAllSelected = async () => {
-        if (selectedAllMembers.length === 0) {
+        if (selectedAllMembers.length === 0 || !selectedProject) {
             toast({ title: "No members selected", variant: "destructive" });
             return;
         }
         setIsSubmittingDelete(true);
         try {
+            // ★★★ THIS IS THE KEY CHANGE ★★★
+            // First, reset any old job status on the backend.
+            await fetch('/api/headless-reset-job', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ siteId: selectedProject.siteId }),
+            });
+
+            // Now, reset the state on the frontend immediately before starting the new job.
+            onDeleteJobStateChange({
+                isDeleteJobRunning: false,
+                deleteProgress: { processed: 0, total: 0 },
+            });
+
+            // Proceed with starting the new deletion job
             const membersToDelete = allMembers
                 .filter(member => selectedAllMembers.includes(member.id))
                 .map(member => ({ memberId: member.id, contactId: member.contactId }));
@@ -481,15 +481,13 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
             });
 
             const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.message || 'Failed to start deletion job.');
-            }
+            if (!response.ok) throw new Error(data.message || 'Failed to start deletion job.');
 
             toast({ title: "Deletion Job Started", description: data.message });
             setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
             setSelectedAllMembers([]);
             onDeleteJobStateChange({ isDeleteJobRunning: true });
+
         } catch (error: any) {
             toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
         } finally {
