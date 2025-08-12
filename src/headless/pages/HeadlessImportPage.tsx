@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+// src/headless/pages/HeadlessImportPage.tsx
+
+import { useState, useEffect, useRef } from 'react'; // <-- Add useRef
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogClose, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -89,6 +91,9 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
     const [testEmailSubject, setTestEmailSubject] = useState('This is a test email');
     const [isSendingTest, setIsSendingTest] = useState(false);
     const [testEmailResponse, setTestEmailResponse] = useState('');
+    
+    // ★ FIX: Add a ref to track the first poll attempt
+    const isFirstPoll = useRef(true);
 
     useEffect(() => {
         const fetchProjects = async () => {
@@ -109,6 +114,7 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
         fetchProjects();
     }, [selectedProject, toast]);
 
+    // ★ FIX: Updated polling logic
     useEffect(() => {
         if (!isDeleteJobRunning || !selectedProject) return;
 
@@ -132,19 +138,28 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
                 } else if (data.status === 'running') {
                     onDeleteJobStateChange({ deleteProgress: { processed: data.processed, total: data.total } });
                 } else if (data.status === 'complete' || data.status === 'idle') {
+                    // This is the key change: if it's the first poll and the status is idle,
+                    // it's a race condition. We ignore it and wait for the next poll.
+                    if (isFirstPoll.current && data.status === 'idle') {
+                        isFirstPoll.current = false; // It's no longer the first poll
+                        return; // Exit without doing anything
+                    }
+
                     onDeleteJobStateChange({ 
                         isDeleteJobRunning: false, 
                         deleteProgress: { processed: data.total, total: data.total } 
                     });
                     toast({ title: "Bulk delete complete!", description: `Finished deleting ${data.total} members.` });
                 }
+                
+                // If we get a valid status, it's no longer the first poll.
+                isFirstPoll.current = false;
+
             } catch (error) {
                 console.error("Failed to fetch delete job status:", error);
                 onDeleteJobStateChange({ isDeleteJobRunning: false });
             }
         }, 2000);
-
-
 
         return () => clearInterval(intervalId);
     }, [isDeleteJobRunning, selectedProject, toast, onDeleteJobStateChange]);
@@ -450,61 +465,55 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
         }
     };
 
-// src/headless/pages/HeadlessImportPage.tsx
-
-const handleDeleteAllSelected = async () => {
-    if (selectedAllMembers.length === 0 || !selectedProject) {
-        toast({ title: "No members selected", variant: "destructive" });
-        return;
-    }
-    setIsSubmittingDelete(true);
-
-    try {
-        const membersToDelete = allMembers
-            .filter(member => selectedAllMembers.includes(member.id))
-            .map(member => ({ memberId: member.id, contactId: member.contactId }));
-
-        // 1. Call the backend to start the job
-        const response = await fetch('/api/headless-start-delete-job', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
-        });
-
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data.message || 'Failed to start deletion job.');
+    // ★ FIX: Updated function to start the job and handle the response
+    const handleDeleteAllSelected = async () => {
+        if (selectedAllMembers.length === 0 || !selectedProject) {
+            toast({ title: "No members selected", variant: "destructive" });
+            return;
         }
+        setIsSubmittingDelete(true);
+        isFirstPoll.current = true; // Reset the poll flag before starting a new job
 
-        // ★ FIX: Use the initial state from the server response to start the progress bar and polling
-        // This avoids the race condition.
-        if (data.initialState) {
-            onDeleteJobStateChange({
-                isDeleteJobRunning: true,
-                deleteProgress: { 
-                    processed: data.initialState.processed, 
-                    total: data.initialState.total 
-                },
+        try {
+            const membersToDelete = allMembers
+                .filter(member => selectedAllMembers.includes(member.id))
+                .map(member => ({ memberId: member.id, contactId: member.contactId }));
+
+            const response = await fetch('/api/headless-start-delete-job', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
             });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to start deletion job.');
+            }
+
+            // Use the initial state from the server response to start the progress bar and polling
+            if (data.initialState) {
+                onDeleteJobStateChange({
+                    isDeleteJobRunning: true,
+                    deleteProgress: { 
+                        processed: data.initialState.processed, 
+                        total: data.initialState.total 
+                    },
+                });
+            }
+
+            toast({ title: "Deletion Job Started", description: data.message });
+
+            setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
+            setSelectedAllMembers([]);
+
+        } catch (error: any) {
+            toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
+            onDeleteJobStateChange({ isDeleteJobRunning: false });
+        } finally {
+            setIsSubmittingDelete(false);
         }
+    };
 
-        toast({ title: "Deletion Job Started", description: data.message });
-
-        // Update the UI list to remove the members from view
-        setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
-        setSelectedAllMembers([]);
-
-    } catch (error: any) {
-        toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
-        // Ensure the progress bar stops if there's an error starting the job.
-        onDeleteJobStateChange({ isDeleteJobRunning: false });
-    } finally {
-        setIsSubmittingDelete(false);
-    }
-};
-
-
-//--------------------------
     const handleValidateLinks = async () => {
         if (!htmlToValidate || !selectedProject) {
             toast({ title: "Input Required", description: "Please select a project and enter some HTML to validate.", variant: "destructive" });
