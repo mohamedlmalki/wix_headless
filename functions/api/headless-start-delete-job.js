@@ -24,70 +24,59 @@ export async function onRequestPost(context) {
             processed: 0,
             total: membersToDelete.length,
             error: null,
+            skipped: [], // Add a field to track skipped members
         };
         await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(initialJobState));
 
         const doDeletion = async () => {
-            let processedCount = 0;
-            
-            try {
-                for (const member of membersToDelete) {
-                    try {
-                        const memberRes = await fetch(`https://www.wixapis.com/members/v1/members/${member.memberId}`, {
-                            method: 'DELETE',
-                            headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
-                        });
+            let currentState = { ...initialJobState };
 
-                        if (!memberRes.ok) {
-                           const errorText = await memberRes.text();
-                           throw new Error(`Failed to delete member ${member.memberId}. Status: ${memberRes.status}. Response: ${errorText}`);
+            for (const member of membersToDelete) {
+                try {
+                    const memberRes = await fetch(`https://www.wixapis.com/members/v1/members/${member.memberId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
+                    });
+
+                    if (!memberRes.ok) {
+                        const errorData = await memberRes.json();
+                        const errorCode = errorData?.details?.applicationError?.code;
+
+                        // ★ FIX: Check for the specific "forbidden" error
+                        if (errorCode === 'OWNER_OR_CONTRIBUTOR_MEMBER_DELETE_FORBIDDEN') {
+                            console.warn(`Skipping deletion for owner/contributor: ${member.memberId}.`);
+                            currentState.skipped.push({ memberId: member.memberId, reason: 'Owner or Contributor' });
+                        } else {
+                            // It's a different, more serious error, so stop the job.
+                            throw new Error(`Failed to delete member ${member.memberId}. Response: ${JSON.stringify(errorData)}`);
                         }
-
+                    } else {
+                        // If member deletion was successful, also delete the contact
                         if (member.contactId) {
-                            const contactRes = await fetch(`https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`, {
+                            await fetch(`https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`, {
                                 method: 'DELETE',
                                 headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
                             });
-                            
-                            if (!contactRes.ok) {
-                               console.error(`Failed to delete contact ${member.contactId}, but member was deleted.`);
-                            }
                         }
-                        
-                        processedCount++;
-                        const progressState = { ...initialJobState, processed: processedCount };
-                        await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(progressState));
-
-                    } catch (memberError) {
-                        console.error('Error deleting a member, stopping job:', memberError);
-                        const errorState = {
-                            ...initialJobState,
-                            status: 'stuck',
-                            processed: processedCount,
-                            // ★ FIX: Removed TypeScript "as Error" syntax
-                            error: memberError.message,
-                        };
-                        await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(errorState));
-                        return;
                     }
-                    
-                    await delay(250);
+
+                    // Whether skipped or deleted, we increment the processed count
+                    currentState.processed++;
+                    await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
+
+                } catch (error) {
+                    currentState.status = 'stuck';
+                    currentState.error = error.message;
+                    await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
+                    return; // Stop the job
                 }
-
-                const finalState = { ...initialJobState, status: 'complete', processed: processedCount };
-                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(finalState));
-
-            } catch (jobError) {
-                console.error('A critical error occurred during the deletion job:', jobError);
-                const criticalErrorState = {
-                    ...initialJobState,
-                    status: 'stuck',
-                    processed: processedCount,
-                    // ★ FIX: Removed TypeScript "as Error" syntax
-                    error: `A critical error stopped the job: ${jobError.message}`,
-                };
-                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(criticalErrorState));
+                
+                await delay(250);
             }
+
+            // Mark the job as complete
+            currentState.status = 'complete';
+            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
         };
 
         context.waitUntil(doDeletion());
