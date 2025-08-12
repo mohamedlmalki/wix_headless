@@ -1,11 +1,14 @@
+// functions/api/headless-job-status.js
+
 // Handles POST requests to /api/headless-job-status
 export async function onRequestPost({ request, env }) {
   try {
     const { siteId } = await request.json();
-    const jobId = `delete-${siteId}`;
+    // ★ FIX: Use the correct key format "delete_job_"
+    const jobKey = `delete_job_${siteId}`;
 
-    // Fetch the latest status for this job from the KV store
-    const statusJson = await env.WIX_HEADLESS_JOBS.get(jobId);
+    // ★ FIX: Use the correct KV namespace "WIX_HEADLESS_CONFIG"
+    const statusJson = await env.WIX_HEADLESS_CONFIG.get(jobKey);
 
     if (!statusJson) {
       // If no status is found, it means there's no active job
