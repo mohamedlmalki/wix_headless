@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import headlessProjectsData from '../config/headless-config.json';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogClose, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -67,7 +66,7 @@ const initialJobState: JobState = {
 
 
 export function HeadlessImportPage() {
-  const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>(headlessProjectsData);
+  const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
   const [selectedProject, setSelectedProject] = useState<HeadlessProject | undefined>(headlessProjects[0]);
   
   const [jobs, setJobs] = useState<Record<string, JobState>>({});
@@ -118,6 +117,28 @@ export function HeadlessImportPage() {
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testEmailResponse, setTestEmailResponse] = useState('');
 
+  useEffect(() => {
+  const fetchProjects = async () => {
+    try {
+      const response = await fetch('/api/headless-get-config');
+      if (response.ok) {
+        const projects = await response.json();
+        setHeadlessProjects(projects);
+        // Automatically select the first project if the list is not empty
+        if (projects.length > 0 && !selectedProject) {
+          setSelectedProject(projects[0]);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch projects:", error);
+      toast({ title: "Error", description: "Could not load projects.", variant: "destructive" });
+    }
+  };
+  fetchProjects();
+}, [selectedProject]); // Re-run if selectedProject changes, to ensure consistency
+
+  //--------------------------------
+
   // --- KEY CHANGE: Subscribe to the JobManager when the component loads ---
   useEffect(() => {
     // This is the callback function the manager will use to send updates
@@ -144,6 +165,9 @@ export function HeadlessImportPage() {
     };
   }, []); // Empty dependency array means this runs only once on mount
 
+
+
+//---------------------------------
   const currentJob = selectedProject ? jobs[selectedProject.siteId] : undefined;
 
   const filteredSearchResults = searchResults.filter(member =>
