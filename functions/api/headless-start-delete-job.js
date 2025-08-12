@@ -1,10 +1,42 @@
 import headlessProjects from '../../src/headless/config/headless-config.json';
 
-// Handles POST requests to /api/headless-start-delete-job
+// This function will run in the background to delete members
+async function startDeletionProcess(project, membersToDelete) {
+  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  for (const member of membersToDelete) {
+    try {
+      const memberApiUrl = `https://www.wixapis.com/members/v1/members/${member.memberId}`;
+      await fetch(memberApiUrl, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': project.apiKey,
+          'wix-site-id': project.siteId,
+        }
+      });
+
+      await sleep(500); // Small delay between API calls
+
+      const contactApiUrl = `https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`;
+      await fetch(contactApiUrl, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': project.apiKey,
+          'wix-site-id': project.siteId,
+        }
+      });
+    } catch (error) {
+      console.error(`Failed to delete member ${member.memberId}:`, error);
+    }
+  }
+}
+
+// This is the main function that responds to the frontend
 export async function onRequestPost({ request, env, waitUntil }) {
   try {
     const { siteId, membersToDelete } = await request.json();
 
+    // Fetch the configuration from the KV store
     const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
     if (!projectsJson) {
       throw new Error("Could not retrieve project configurations.");
@@ -25,12 +57,12 @@ export async function onRequestPost({ request, env, waitUntil }) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
-    
-    // Use waitUntil to allow the deletion process to run in the background
+
+    // Tell Cloudflare to keep the deletion process running after the response is sent
     waitUntil(startDeletionProcess(project, membersToDelete));
 
     return new Response(JSON.stringify({ message: `Deletion job for ${membersToDelete.length} members has been queued.` }), {
-      status: 202,
+      status: 202, // 202 Accepted
       headers: { 'Content-Type': 'application/json' },
     });
 
@@ -39,37 +71,5 @@ export async function onRequestPost({ request, env, waitUntil }) {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
-  }
-}
-
-async function startDeletionProcess(project, membersToDelete) {
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-  
-  for (const member of membersToDelete) {
-    try {
-      // Step 1: Delete Member
-      const memberApiUrl = `https://www.wixapis.com/members/v1/members/${member.memberId}`;
-      await fetch(memberApiUrl, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': project.apiKey,
-          'wix-site-id': project.siteId,
-        }
-      });
-
-      await sleep(500);
-
-      // Step 2: Delete Contact
-      const contactApiUrl = `https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`;
-      await fetch(contactApiUrl, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': project.apiKey,
-          'wix-site-id': project.siteId,
-        }
-      });
-    } catch (error) {
-      console.error(`Failed to delete member ${member.memberId}:`, error);
-    }
   }
 }
