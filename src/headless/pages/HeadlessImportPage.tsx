@@ -448,53 +448,50 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
         }
     };
 
-    const handleDeleteAllSelected = async () => {
-        if (selectedAllMembers.length === 0 || !selectedProject) {
-            toast({ title: "No members selected", variant: "destructive" });
-            return;
-        }
-        setIsSubmittingDelete(true);
-        try {
-            // ★★★ THIS IS THE KEY CHANGE ★★★
-            // First, reset any old job status on the backend.
-            await fetch('/api/headless-reset-job', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId }),
-            });
+// Find this function in your HeadlessImportPage.tsx file
+const handleDeleteAllSelected = async () => {
+    if (selectedAllMembers.length === 0 || !selectedProject) {
+        toast({ title: "No members selected", variant: "destructive" });
+        return;
+    }
+    setIsSubmittingDelete(true);
+    try {
+        // ★★★ REMOVE THE CALL TO THE RESET API ★★★
+        // await fetch('/api/headless-reset-job', { ... }); // This line should be deleted.
 
-            // Now, reset the state on the frontend immediately before starting the new job.
-            onDeleteJobStateChange({
-                isDeleteJobRunning: false,
-                deleteProgress: { processed: 0, total: 0 },
-            });
+        // Immediately reset the frontend state.
+        onDeleteJobStateChange({
+            isDeleteJobRunning: false,
+            deleteProgress: { processed: 0, total: 0 },
+        });
 
-            // Proceed with starting the new deletion job
-            const membersToDelete = allMembers
-                .filter(member => selectedAllMembers.includes(member.id))
-                .map(member => ({ memberId: member.id, contactId: member.contactId }));
+        const membersToDelete = allMembers
+            .filter(member => selectedAllMembers.includes(member.id))
+            .map(member => ({ memberId: member.id, contactId: member.contactId }));
 
-            const response = await fetch('/api/headless-start-delete-job', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject?.siteId, membersToDelete }),
-            });
+        const response = await fetch('/api/headless-start-delete-job', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ siteId: selectedProject?.siteId, membersToDelete }),
+        });
 
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.message || 'Failed to start deletion job.');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || 'Failed to start deletion job.');
 
-            toast({ title: "Deletion Job Started", description: data.message });
-            setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
-            setSelectedAllMembers([]);
-            onDeleteJobStateChange({ isDeleteJobRunning: true });
+        toast({ title: "Deletion Job Started", description: data.message });
+        setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
+        setSelectedAllMembers([]);
+        onDeleteJobStateChange({ isDeleteJobRunning: true });
 
-        } catch (error: any) {
-            toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
-        } finally {
-            setIsSubmittingDelete(false);
-        }
-    };
+    } catch (error: any) {
+        toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
+    } finally {
+        setIsSubmittingDelete(false);
+    }
+};
 
+
+//--------------------------
     const handleValidateLinks = async () => {
         if (!htmlToValidate || !selectedProject) {
             toast({ title: "Input Required", description: "Please select a project and enter some HTML to validate.", variant: "destructive" });
