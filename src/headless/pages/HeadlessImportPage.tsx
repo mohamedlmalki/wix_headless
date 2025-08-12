@@ -747,7 +747,7 @@ export function HeadlessImportPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <Card className="bg-gradient-card shadow-card border-primary/10 h-full">
                     <CardHeader className="flex flex-row items-center justify-between">
-                        <CardTitle>1. Select Headless Project</CardTitle>
+                        <CardTitle>Select Project</CardTitle>
                         <div className="flex gap-2">
                             <Button variant="outline" size="sm" onClick={() => handleOpenDialog('add')}><PlusCircle className="mr-2 h-4 w-4" /> Add</Button>
                             <Button variant="outline" size="sm" onClick={() => handleOpenDialog('edit')} disabled={!selectedProject}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>
