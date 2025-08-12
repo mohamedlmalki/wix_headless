@@ -454,43 +454,44 @@ const handleDeleteAllSelected = async () => {
             return;
         }
         setIsSubmittingDelete(true);
+
         try {
+            // ★★★ THIS IS THE FINAL FIX ★★★
+            // 1. Immediately reset the progress bar on the screen to zero.
+            // This guarantees the user sees the process start from the beginning.
+            onDeleteJobStateChange({
+                isDeleteJobRunning: true, // This starts the polling
+                deleteProgress: { processed: 0, total: selectedAllMembers.length },
+            });
+
+            // 2. Now, tell the backend to start the actual deletion process.
             const membersToDelete = allMembers
                 .filter(member => selectedAllMembers.includes(member.id))
                 .map(member => ({ memberId: member.id, contactId: member.contactId }));
 
-            // Start the job and wait for the initial state response
             const response = await fetch('/api/headless-start-delete-job', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject?.siteId, membersToDelete }),
+                body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
             });
 
             const data = await response.json();
-            if (!response.ok) throw new Error(data.message || 'Failed to start deletion job.');
+            if (!response.ok) {
+                // If starting the job fails, stop the progress bar.
+                onDeleteJobStateChange({ isDeleteJobRunning: false });
+                throw new Error(data.message || 'Failed to start deletion job.');
+            }
 
             toast({ title: "Deletion Job Started", description: data.message });
 
-            // ★★★ THE FINAL FIX ★★★
-            // Use the initial state from the backend's response to set the progress bar correctly
-            if (data.initialState) {
-                 onDeleteJobStateChange({
-                    isDeleteJobRunning: true,
-                    deleteProgress: { 
-                        processed: data.initialState.processed, 
-                        total: data.initialState.total 
-                    },
-                });
-            } else {
-                 onDeleteJobStateChange({ isDeleteJobRunning: true });
-            }
-
-            // Update the UI immediately
+            // 3. Update the UI list to remove the members.
             setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
             setSelectedAllMembers([]);
 
         } catch (error: any) {
             toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
+            // Ensure the progress bar stops if there's an error.
+            onDeleteJobStateChange({ isDeleteJobRunning: false });
         } finally {
             setIsSubmittingDelete(false);
         }
