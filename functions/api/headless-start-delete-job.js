@@ -2,94 +2,91 @@
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// This function will check the status of a bulk job initiated on Wix's side.
+async function pollWixJobStatus(jobId, project) {
+  const wixApiUrl = `https://www.wixapis.com/jobs/v1/jobs/${jobId}`;
+  let jobStatus = 'IN_PROGRESS';
+
+  while (jobStatus === 'IN_PROGRESS' || jobStatus === 'ACCEPTED') {
+    await delay(2000); // Wait 2 seconds before checking status
+    const response = await fetch(wixApiUrl, {
+      method: 'GET',
+      headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
+    });
+    if (!response.ok) throw new Error('Failed to get Wix job status.');
+    
+    const data = await response.json();
+    jobStatus = data.status;
+  }
+  return jobStatus;
+}
+
+
 export async function onRequestPost(context) {
     const { request, env } = context;
+    const { siteId, membersToDelete } = await request.json();
+    const jobKey = `delete_job_${siteId}`;
 
     try {
-        const { siteId, membersToDelete } = await request.json();
-        const jobKey = `delete_job_${siteId}`;
-
         const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
         if (!projectsJson) throw new Error("Could not retrieve project configurations.");
         
         const project = projectsJson.find(p => p.siteId === siteId);
-        if (!project) {
-            return new Response(JSON.stringify({ message: `Project not found for siteId: ${siteId}` }), { status: 404 });
-        }
+        if (!project) return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
 
-        await env.WIX_HEADLESS_CONFIG.delete(jobKey);
+        // This is the background task that will run.
+        const doBulkDeletion = async () => {
+            try {
+                // STEP 1: Bulk Delete Members
+                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'running', processed: 0, total: 2, step: 'Deleting Members...' }));
 
-        const initialJobState = {
-            status: 'running',
-            processed: 0,
-            total: membersToDelete.length,
-            error: null,
-            skipped: [], // Add a field to track skipped members
-        };
-        await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(initialJobState));
+                const memberIds = membersToDelete.map(m => m.memberId);
+                const memberDeleteRes = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
+                    method: 'POST',
+                    headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ memberIds })
+                });
 
-        const doDeletion = async () => {
-            let currentState = { ...initialJobState };
+                if (!memberDeleteRes.ok) throw new Error('Failed to bulk delete members.');
 
-            for (const member of membersToDelete) {
-                try {
-                    const memberRes = await fetch(`https://www.wixapis.com/members/v1/members/${member.memberId}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
-                    });
-
-                    if (!memberRes.ok) {
-                        const errorData = await memberRes.json();
-                        const errorCode = errorData?.details?.applicationError?.code;
-
-                        // ★ FIX: Check for the specific "forbidden" error
-                        if (errorCode === 'OWNER_OR_CONTRIBUTOR_MEMBER_DELETE_FORBIDDEN') {
-                            console.warn(`Skipping deletion for owner/contributor: ${member.memberId}.`);
-                            currentState.skipped.push({ memberId: member.memberId, reason: 'Owner or Contributor' });
-                        } else {
-                            // It's a different, more serious error, so stop the job.
-                            throw new Error(`Failed to delete member ${member.memberId}. Response: ${JSON.stringify(errorData)}`);
-                        }
-                    } else {
-                        // If member deletion was successful, also delete the contact
-                        if (member.contactId) {
-                            await fetch(`https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`, {
-                                method: 'DELETE',
-                                headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
-                            });
-                        }
-                    }
-
-                    // Whether skipped or deleted, we increment the processed count
-                    currentState.processed++;
-                    await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
-
-                } catch (error) {
-                    currentState.status = 'stuck';
-                    currentState.error = error.message;
-                    await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
-                    return; // Stop the job
-                }
+                // STEP 2: Start Bulk Contact Deletion Job
+                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'running', processed: 1, total: 2, step: 'Deleting Contacts...' }));
                 
-                await delay(250);
+                const contactEmails = membersToDelete.map(m => m.emailAddress).filter(Boolean);
+                if (contactEmails.length > 0) {
+                    const contactDeleteRes = await fetch('https://www.wixapis.com/contacts/v4/bulk/contacts/delete', {
+                        method: 'POST',
+                        headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ filter: { "info.emails.email": { "$in": contactEmails } } })
+                    });
+                    
+                    if (!contactDeleteRes.ok) throw new Error('Failed to start bulk contact deletion job.');
+                    
+                    const { jobId } = await contactDeleteRes.json();
+                    
+                    // STEP 3: Monitor the Contact Deletion Job
+                    const finalStatus = await pollWixJobStatus(jobId, project);
+                    if (finalStatus !== 'COMPLETED') throw new Error(`Contact deletion job finished with status: ${finalStatus}`);
+                }
+
+                // FINAL STEP: Mark job as complete
+                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'complete', processed: 2, total: 2, step: 'Done!' }));
+
+            } catch (error) {
+                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'stuck', error: error.message }));
             }
-
-            // Mark the job as complete
-            currentState.status = 'complete';
-            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
         };
+        
+        // Start the background task without waiting for it to finish
+        context.waitUntil(doBulkDeletion());
 
-        context.waitUntil(doDeletion());
-
-        return new Response(JSON.stringify({ success: true, message: "Deletion job started." }), {
-            status: 200,
+        // Immediately respond to the frontend that the job has started
+        return new Response(JSON.stringify({ success: true, message: "Bulk deletion job started." }), {
+            status: 202, // Accepted
             headers: { 'Content-Type': 'application/json' },
         });
 
     } catch (e) {
-        return new Response(JSON.stringify({ message: 'An error occurred.', error: e.message }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        return new Response(JSON.stringify({ message: 'An error occurred.', error: e.message }), { status: 500 });
     }
 }
