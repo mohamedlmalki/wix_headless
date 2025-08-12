@@ -1,3 +1,5 @@
+// functions/api/headless-get-stats.js
+
 export async function onRequestPost({ request, env }) {
   try {
     const { siteId, campaignIds } = await request.json();
@@ -15,7 +17,7 @@ export async function onRequestPost({ request, env }) {
       });
     }
 
-    if (!campaignIds || !Array.isArray(campaignIds)) {
+    if (!campaignIds || !Array.isArray(campaignIds) || campaignIds.length === 0) {
       return new Response(JSON.stringify({ message: "Request must include a 'campaignIds' array." }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
@@ -23,10 +25,11 @@ export async function onRequestPost({ request, env }) {
     }
 
     // Construct the URL with query parameters
-    const apiUrl = new URL('https://www.wixapis.com/email-marketing/v1/campaigns/statistics');
-    campaignIds.forEach(id => apiUrl.searchParams.append('campaignIds', id));
+    const params = new URLSearchParams();
+    campaignIds.forEach(id => params.append('campaignIds', id));
+    const wixApiUrl = `https://www.wixapis.com/email-marketing/v1/campaigns/statistics?${params.toString()}`;
 
-    const wixResponse = await fetch(apiUrl.toString(), {
+    const wixResponse = await fetch(wixApiUrl, {
       method: 'GET',
       headers: {
         'Authorization': project.apiKey,
