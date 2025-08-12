@@ -13,14 +13,17 @@ async function pollWixJobStatus(jobId, project) {
       method: 'GET',
       headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
     });
-    if (!response.ok) throw new Error('Failed to get Wix job status.');
+    // ★ FIX: Add detailed error logging
+    if (!response.ok) {
+        const errorDetails = await response.json();
+        throw new Error(`Failed to get Wix job status. Wix API responded with: ${JSON.stringify(errorDetails)}`);
+    }
     
     const data = await response.json();
     jobStatus = data.status;
   }
   return jobStatus;
 }
-
 
 export async function onRequestPost(context) {
     const { request, env } = context;
@@ -46,8 +49,12 @@ export async function onRequestPost(context) {
                     headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
                     body: JSON.stringify({ memberIds })
                 });
-
-                if (!memberDeleteRes.ok) throw new Error('Failed to bulk delete members.');
+                
+                // ★ FIX: Add detailed error logging
+                if (!memberDeleteRes.ok) {
+                    const errorDetails = await memberDeleteRes.json();
+                    throw new Error(`Failed to bulk delete members. Wix API responded with: ${JSON.stringify(errorDetails)}`);
+                }
 
                 // STEP 2: Start Bulk Contact Deletion Job
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'running', processed: 1, total: 2, step: 'Deleting Contacts...' }));
@@ -60,7 +67,11 @@ export async function onRequestPost(context) {
                         body: JSON.stringify({ filter: { "info.emails.email": { "$in": contactEmails } } })
                     });
                     
-                    if (!contactDeleteRes.ok) throw new Error('Failed to start bulk contact deletion job.');
+                    // ★ FIX: Add detailed error logging
+                    if (!contactDeleteRes.ok) {
+                        const errorDetails = await contactDeleteRes.json();
+                        throw new Error(`Failed to start bulk contact deletion job. Wix API responded with: ${JSON.stringify(errorDetails)}`);
+                    }
                     
                     const { jobId } = await contactDeleteRes.json();
                     
@@ -77,12 +88,10 @@ export async function onRequestPost(context) {
             }
         };
         
-        // Start the background task without waiting for it to finish
         context.waitUntil(doBulkDeletion());
 
-        // Immediately respond to the frontend that the job has started
         return new Response(JSON.stringify({ success: true, message: "Bulk deletion job started." }), {
-            status: 202, // Accepted
+            status: 202,
             headers: { 'Content-Type': 'application/json' },
         });
 
