@@ -466,53 +466,55 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
     };
 
     // ★ FIX: Updated function to start the job and handle the response
-    const handleDeleteAllSelected = async () => {
-        if (selectedAllMembers.length === 0 || !selectedProject) {
-            toast({ title: "No members selected", variant: "destructive" });
-            return;
-        }
-        setIsSubmittingDelete(true);
-        isFirstPoll.current = true; // Reset the poll flag before starting a new job
+// src/headless/pages/HeadlessImportPage.tsx
 
-        try {
-            const membersToDelete = allMembers
-                .filter(member => selectedAllMembers.includes(member.id))
-                .map(member => ({ memberId: member.id, contactId: member.contactId }));
+const handleDeleteAllSelected = async () => {
+    if (selectedAllMembers.length === 0 || !selectedProject) {
+        toast({ title: "No members selected", variant: "destructive" });
+        return;
+    }
+    setIsSubmittingDelete(true);
 
-            const response = await fetch('/api/headless-start-delete-job', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
-            });
+    // ★ FIX: Set the initial state on the frontend IMMEDIATELY.
+    // This ensures the progress bar appears correctly and avoids the race condition.
+    onDeleteJobStateChange({
+        isDeleteJobRunning: true, // This starts the polling
+        deleteProgress: { processed: 0, total: selectedAllMembers.length },
+    });
 
-            const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.message || 'Failed to start deletion job.');
-            }
+    try {
+        const membersToDelete = allMembers
+            .filter(member => selectedAllMembers.includes(member.id))
+            .map(member => ({ memberId: member.id, contactId: member.contactId }));
 
-            // Use the initial state from the server response to start the progress bar and polling
-            if (data.initialState) {
-                onDeleteJobStateChange({
-                    isDeleteJobRunning: true,
-                    deleteProgress: { 
-                        processed: data.initialState.processed, 
-                        total: data.initialState.total 
-                    },
-                });
-            }
+        // Now, tell the backend to start the job in the background.
+        const response = await fetch('/api/headless-start-delete-job', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
+        });
 
-            toast({ title: "Deletion Job Started", description: data.message });
-
-            setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
-            setSelectedAllMembers([]);
-
-        } catch (error: any) {
-            toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
+        const data = await response.json();
+        if (!response.ok) {
+            // If starting the job fails, stop the progress bar and show an error.
             onDeleteJobStateChange({ isDeleteJobRunning: false });
-        } finally {
-            setIsSubmittingDelete(false);
+            throw new Error(data.message || 'Failed to start deletion job.');
         }
-    };
+
+        toast({ title: "Deletion Job Started", description: data.message });
+
+        // Update the UI list to remove the members from view.
+        setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
+        setSelectedAllMembers([]);
+
+    } catch (error: any) {
+        toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
+        // Ensure the progress bar stops if there's an error starting the job.
+        onDeleteJobStateChange({ isDeleteJobRunning: false });
+    } finally {
+        setIsSubmittingDelete(false);
+    }
+};
 
     const handleValidateLinks = async () => {
         if (!htmlToValidate || !selectedProject) {
