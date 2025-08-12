@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import headlessProjectsData from '../config/headless-config.json';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogClose, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -7,14 +8,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Server, PlayCircle, CheckCircle, XCircle, FileJson, Trash2, Search, RefreshCw, Save, PlusCircle, Pencil, Download, ListChecks, Link, Link2, Send, PauseCircle, StopCircle, Clock } from "lucide-react";
+import { Server, PlayCircle, CheckCircle, XCircle, FileJson, Trash2, Search, RefreshCw, Save, PlusCircle, BarChart2, Users, MailCheck, MailX, MousePointerClick, Pencil, Download, ListChecks, Link, Link2, AlertCircle, MailMinus, Send, PauseCircle, StopCircle, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import Navbar from '@/components/Navbar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from '@/components/ui/progress';
-import { jobManager, JobState, UpdatePayload } from '../lib/JobManager';
+import { jobManager, JobState } from '../lib/JobManager';
 
 const exportEmailsToTxt = (data: any[], filename: string) => {
     const emailKeys = ['email', 'loginEmail', 'emailAddress'];
@@ -54,17 +55,16 @@ const initialJobState: JobState = {
     jobCancelled: false,
 };
 
-export function HeadlessImportPage() {
-   
-  const [isDeletingAll, setIsDeletingAll] = useState(false);
-  const [deleteProgress, setDeleteProgress] = useState({ processed: 0, total: 0 });
-  const [isDeleteJobRunning, setIsDeleteJobRunning] = useState(false);
-   
-  const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
-  const [selectedProject, setSelectedProject] = useState<HeadlessProject | undefined>(headlessProjects[0]);
-  
-  const [jobs, setJobs] = useState<Record<string, JobState>>({});
+// ★★★ UPDATE: The component now receives its state via props ★★★
+interface HeadlessImportPageProps {
+  jobs: Record<string, JobState>;
+  onJobStateChange: (siteId: string, updates: Partial<JobState>) => void;
+}
 
+export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChange }: HeadlessImportPageProps) {
+  const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
+  const [selectedProject, setSelectedProject] = useState<HeadlessProject | undefined>(undefined);
+  
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Member[]>([]);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
@@ -85,6 +85,7 @@ export function HeadlessImportPage() {
   const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [isFetchingAllMembers, setIsFetchingAllMembers] = useState(false);
   const [selectedAllMembers, setSelectedAllMembers] = useState<string[]>([]);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
   const [allMembersFilterQuery, setAllMembersFilterQuery] = useState("");
   const [importFilter, setImportFilter] = useState<'all' | 'Success' | 'Failed'>('all');
@@ -105,71 +106,26 @@ export function HeadlessImportPage() {
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testEmailResponse, setTestEmailResponse] = useState('');
 
+  // ★★★ REMOVED: The useEffect that subscribed to the job manager is no longer needed here ★★★
+
   useEffect(() => {
-    const fetchProjects = async () => {
+    const fetchConfig = async () => {
       try {
         const response = await fetch('/api/headless-get-config');
         if (response.ok) {
-          const projects = await response.json();
-          setHeadlessProjects(projects);
-          if (projects.length > 0 && !selectedProject) {
-            setSelectedProject(projects[0]);
+          const config = await response.json();
+          setHeadlessProjects(config);
+          // Set initial project if not already set
+          if (!selectedProject && config.length > 0) {
+            setSelectedProject(config[0]);
           }
         }
       } catch (error) {
-        console.error("Failed to fetch projects:", error);
-        toast({ title: "Error", description: "Could not load projects.", variant: "destructive" });
+        toast({ title: "Error", description: "Failed to load project configuration.", variant: "destructive" });
       }
     };
-    fetchProjects();
-  }, [selectedProject, toast]);
-
-  useEffect(() => {
-    const handleJobUpdate = (data: UpdatePayload) => {
-      setJobs(prev => ({
-          ...prev,
-          [data.siteId]: {
-              ...(prev[data.siteId] || initialJobState),
-              ...data.payload,
-          }
-      }));
-    };
-    
-    const initialState = jobManager.getJobsState();
-    setJobs(initialState);
-    
-    jobManager.subscribe(handleJobUpdate);
-    
-    return () => {
-      jobManager.unsubscribe();
-    };
+    fetchConfig();
   }, []);
-
-  useEffect(() => {
-    if (!isDeleteJobRunning || !selectedProject) return;
-
-    const intervalId = setInterval(async () => {
-      try {
-        const response = await fetch('/api/headless-job-status', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ siteId: selectedProject.siteId }),
-        });
-        const data = await response.json();
-        if (data.status === 'running') {
-          setDeleteProgress({ processed: data.processed, total: data.total });
-        } else if (data.status === 'complete' || data.status === 'idle') {
-          setIsDeleteJobRunning(false);
-          setDeleteProgress({ processed: data.total, total: data.total });
-          toast({ title: "Bulk delete complete!", description: `Finished deleting ${data.total} members.` });
-        }
-      } catch (error) {
-        console.error("Failed to fetch delete job status:", error);
-      }
-    }, 2000);
-
-    return () => clearInterval(intervalId);
-  }, [isDeleteJobRunning, selectedProject, toast]);
 
   const currentJob = selectedProject ? jobs[selectedProject.siteId] : undefined;
 
@@ -188,16 +144,6 @@ export function HeadlessImportPage() {
     return result.status === importFilter;
   }) : [];
   
-  const handleJobStateChange = (siteId: string, updates: Partial<JobState>) => {
-    setJobs(prev => ({
-        ...prev,
-        [siteId]: {
-            ...(prev[siteId] || initialJobState),
-            ...updates,
-        }
-    }));
-  };
-
   const fetchSenderDetails = async (siteId: string) => {
     if (!siteId) return;
     setIsFetchingSender(true);
@@ -291,20 +237,12 @@ export function HeadlessImportPage() {
     };
 
     try {
-        let currentConfig: HeadlessProject[] = [];
-        try {
-            const response = await fetch('/api/headless-get-config');
-            if (response.ok) {
-                currentConfig = await response.json();
-            }
-        } catch (e) {
-            console.error("Could not fetch initial config, starting with an empty list.", e);
-        }
-
+        const response = await fetch('/api/headless-get-config');
+        const currentConfig: HeadlessProject[] = await response.json();
         let updatedConfig: HeadlessProject[];
 
         if (dialogMode === 'edit') {
-            updatedConfig = currentConfig.map(p => (p.siteId === originalSiteId ? projectData : p));
+            updatedConfig = currentConfig.map(p => p.siteId === originalSiteId ? projectData : p);
         } else {
             if (currentConfig.some(p => p.siteId === siteId)) {
                 toast({ title: "Duplicate Site ID", description: "A project with this Site ID already exists.", variant: "destructive" });
@@ -327,34 +265,6 @@ export function HeadlessImportPage() {
         setProjectDialogOpen(false);
     } catch (error) {
         toast({ title: "Error Saving Project", description: (error as Error).message, variant: "destructive" });
-    }
-  };
-  
-  const handleDeleteProject = async () => {
-    if (!selectedProject) {
-      toast({ title: "No Project Selected", description: "Please select a project to delete.", variant: "destructive" });
-      return;
-    }
-
-    try {
-      const updatedConfig = headlessProjects.filter(p => p.siteId !== selectedProject.siteId);
-
-      const updateResponse = await fetch('/api/headless-update-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: updatedConfig }),
-      });
-
-      if (!updateResponse.ok) {
-        throw new Error('Failed to save the updated project configuration.');
-      }
-
-      toast({ title: "Success", description: `Project "${selectedProject.projectName}" has been deleted.` });
-      setHeadlessProjects(updatedConfig);
-      setSelectedProject(updatedConfig.length > 0 ? updatedConfig[0] : undefined);
-
-    } catch (error) {
-      toast({ title: "Error Deleting Project", description: (error as Error).message, variant: "destructive" });
     }
   };
   
@@ -508,7 +418,6 @@ export function HeadlessImportPage() {
         toast({ title: "Deletion Job Started", description: data.message });
         setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
         setSelectedAllMembers([]);
-        setIsDeleteJobRunning(true);
     } catch (error: any) {
         toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
     } finally {
@@ -567,18 +476,15 @@ export function HeadlessImportPage() {
   };
   
   const handleSendTestEmail = async () => {
-    if (!selectedProject?.campaigns || Object.keys(selectedProject.campaigns).length === 0) {
-      toast({ title: "No Campaign Configured", description: "Please edit the project and add a campaign ID.", variant: "destructive" });
-      return;
+    const selectedCampaignId = "YOUR_CAMPAIGN_ID_HERE"; // This needs to be dynamic
+    if (!selectedCampaignId) {
+        toast({ title: "No Campaign Selected", description: "Please select a campaign from the statistics section first.", variant: "destructive" });
+        return;
     }
     if (!testEmailAddress) {
-      toast({ title: "Recipient Email Required", description: "Please enter an email address to send the test to.", variant: "destructive" });
-      return;
+        toast({ title: "Recipient Email Required", description: "Please enter an email address to send the test to.", variant: "destructive" });
+        return;
     }
-    
-    // Use the first available campaign ID for the test
-    const campaignId = Object.values(selectedProject.campaigns)[0];
-
     setIsSendingTest(true);
     setTestEmailResponse('');
     try {
@@ -587,7 +493,7 @@ export function HeadlessImportPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 siteId: selectedProject?.siteId, 
-                campaignId: campaignId,
+                campaignId: selectedCampaignId,
                 emailSubject: testEmailSubject,
                 toEmailAddress: testEmailAddress,
             }),
@@ -662,20 +568,6 @@ export function HeadlessImportPage() {
                 </div>
             </div>
           
-            {isDeleteJobRunning && (
-                <Card className="bg-gradient-card shadow-card border-primary/10">
-                    <CardHeader>
-                        <CardTitle>Bulk Deletion in Progress</CardTitle>
-                        <CardDescription>
-                            Deleting {deleteProgress.processed} of {deleteProgress.total} members...
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <Progress value={(deleteProgress.processed / (deleteProgress.total || 1)) * 100} />
-                    </CardContent>
-                </Card>
-            )}
-
             {(isSearching || searchResults.length > 0) && (
                 <Card className="bg-gradient-card shadow-card border-primary/10">
                     <CardHeader className="flex flex-row justify-between items-center">
@@ -704,31 +596,10 @@ export function HeadlessImportPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <Card className="bg-gradient-card shadow-card border-primary/10 h-full">
                     <CardHeader className="flex flex-row items-center justify-between">
-                        <CardTitle>Select Project</CardTitle>
+                        <CardTitle>1. Select Headless Project</CardTitle>
                         <div className="flex gap-2">
                             <Button variant="outline" size="sm" onClick={() => handleOpenDialog('add')}><PlusCircle className="mr-2 h-4 w-4" /> Add</Button>
                             <Button variant="outline" size="sm" onClick={() => handleOpenDialog('edit')} disabled={!selectedProject}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>
-                            <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                    <Button variant="destructive" size="sm" disabled={!selectedProject}><Trash2 className="mr-2 h-4 w-4" /> Delete</Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                        <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                            This will permanently delete the project "{selectedProject?.projectName}". This action cannot be undone.
-                                        </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction onClick={() => {
-                                            handleDeleteProject();
-                                        }}>
-                                            Continue
-                                        </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                </AlertDialogContent>
-                            </AlertDialog>
                         </div>
                     </CardHeader>
                     <CardContent>
@@ -884,7 +755,7 @@ export function HeadlessImportPage() {
                             placeholder="user1@example.com
     user2@example.com" 
                             className="h-48 resize-y font-mono text-sm" 
-                            disabled={currentJob?.isLoading}
+                            disabled={currentJob?.isLoading} 
                         />
                     </CardContent>
                 </Card>
@@ -979,3 +850,11 @@ export function HeadlessImportPage() {
     </div>
   );
 }
+
+const SummaryStat = ({ icon: Icon, title, value }: { icon: React.ElementType, title: string, value: number }) => (
+    <div className="flex flex-col items-center gap-1 p-2 rounded-md">
+        <Icon className="h-5 w-5 text-muted-foreground" />
+        <p className="text-xl font-bold">{value.toLocaleString()}</p>
+        <p className="text-xs text-muted-foreground">{title}</p>
+    </div>
+);
