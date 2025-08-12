@@ -83,8 +83,6 @@ export async function onRequestPost(context) {
                     await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
                     
                     const chunk = memberIdChunks[i];
-                    // ★★★ THE KEY CHANGE IS HERE ★★★
-                    // We are now using the filter-based endpoint instead of the ID-based one.
                     const memberDeleteRes = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete-by-filter', {
                         method: 'POST',
                         headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
@@ -97,10 +95,10 @@ export async function onRequestPost(context) {
                     }
                 }
 
-                // --- Add delay for eventual consistency ---
-                currentState = { ...currentState, step: `Finalizing member deletion... (waiting 1s)` };
+                // ★ FIX: Increased delay to 3 seconds as requested
+                currentState = { ...currentState, step: `Finalizing member deletion... (waiting 3s)` };
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
-                await delay(1000);
+                await delay(3000);
 
                 // --- STEP 2: Bulk Delete All Contact Chunks ---
                 for (let i = 0; i < contactEmailChunks.length; i++) {
