@@ -1,11 +1,10 @@
 import headlessProjects from '../../src/headless/config/headless-config.json';
 
 // Handles POST requests to /api/headless-start-delete-job
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost({ request, env, waitUntil }) {
   try {
     const { siteId, membersToDelete } = await request.json();
 
-    // Fetch the configuration from the KV store
     const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
     if (!projectsJson) {
       throw new Error("Could not retrieve project configurations.");
@@ -27,16 +26,11 @@ export async function onRequestPost({ request, env }) {
       });
     }
     
-    // NOTE: Cloudflare Functions currently run for a maximum of 30 seconds. 
-    // For very large deletion jobs, a more robust solution using Queues would be needed.
-    // This implementation will process deletions sequentially within the time limit.
-
-    // We are not awaiting this call, which allows the function to respond immediately
-    // while the deletion process continues in the background.
-    startDeletionProcess(project, membersToDelete);
+    // Use waitUntil to allow the deletion process to run in the background
+    waitUntil(startDeletionProcess(project, membersToDelete));
 
     return new Response(JSON.stringify({ message: `Deletion job for ${membersToDelete.length} members has been queued.` }), {
-      status: 202, // 202 Accepted: The request has been accepted for processing, but the processing has not been completed.
+      status: 202,
       headers: { 'Content-Type': 'application/json' },
     });
 
@@ -48,7 +42,6 @@ export async function onRequestPost({ request, env }) {
   }
 }
 
-// This function runs the actual deletions.
 async function startDeletionProcess(project, membersToDelete) {
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
   
@@ -64,7 +57,7 @@ async function startDeletionProcess(project, membersToDelete) {
         }
       });
 
-      await sleep(500); // Wait between calls
+      await sleep(500);
 
       // Step 2: Delete Contact
       const contactApiUrl = `https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`;

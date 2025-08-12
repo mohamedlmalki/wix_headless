@@ -41,10 +41,17 @@ async function fetchAllMembers(project) {
 }
 
 // Handles POST requests to /api/headless-list-all
-export async function onRequestPost({ request }) {
+export async function onRequestPost({ request, env }) {
   try {
     const { siteId } = await request.json();
-    const project = headlessProjects.find(p => p.siteId === siteId);
+
+    // Fetch the configuration from the KV store
+    const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
+    if (!projectsJson) {
+      throw new Error("Could not retrieve project configurations.");
+    }
+
+    const project = projectsJson.find(p => p.siteId === siteId);
 
     if (!project) {
       return new Response(JSON.stringify({ message: `Project configuration not found for siteId: ${siteId}` }), {
@@ -53,7 +60,7 @@ export async function onRequestPost({ request }) {
       });
     }
 
-    const allMembers = await fetchAllMembers(project);
+    const allMembers = await fetchAllMembers(project); // The helper function needs the project info from KV
 
     return new Response(JSON.stringify({ members: allMembers }), {
       status: 200,
