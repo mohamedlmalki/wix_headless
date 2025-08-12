@@ -22,7 +22,8 @@ export async function onRequestPost({ request, env }) {
       });
     }
 
-    const wixApiUrl = `https://www.wixapis.com/email-marketing/v1/campaigns/${campaignId}/statistics/recipients?activity=${activity}`;
+    // This is the only line that has been changed
+    const wixApiUrl = `https://www.wixapis.com/email-marketing/v1/campaigns/${campaignId}/statistics/recipients?activity=${activity}&paging.limit=1000`;
 
     const wixResponse = await fetch(wixApiUrl, {
       method: 'GET',
