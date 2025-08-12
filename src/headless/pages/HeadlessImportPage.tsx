@@ -87,7 +87,6 @@ export function HeadlessImportPage() {
     const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
     const [statistics, setStatistics] = useState<CampaignStatistics | null>(null);
     const [isFetchingStats, setIsFetchingStats] = useState(false);
-    const [isFetchingRecipients, setIsFetchingRecipients] = useState(false);
     const [recipientDialogData, setRecipientDialogData] = useState<{title: string, recipients: CampaignRecipient[]}>({title: '', recipients: []});
     const [isAllMembersDialogOpen, setAllMembersDialogOpen] = useState(false);
     const [allMembers, setAllMembers] = useState<Member[]>([]);
@@ -368,143 +367,145 @@ export function HeadlessImportPage() {
             toast({ title: "Error Saving Project", description: (error as Error).message, variant: "destructive" });
         }
     };
-	const handleDeleteProject = async () => {
+
+    const handleDeleteProject = async () => {
         if (!selectedProject) {
-            toast({ title: "No Project Selected", description: "Please select a project to delete.", variant: "destructive" });
-            return;
+          toast({ title: "No Project Selected", description: "Please select a project to delete.", variant: "destructive" });
+          return;
         }
-
+    
         try {
-            const updatedConfig = headlessProjects.filter(p => p.siteId !== selectedProject.siteId);
-
-            const updateResponse = await fetch('/api/headless-update-config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ config: updatedConfig }),
-            });
-
-            if (!updateResponse.ok) {
-                throw new Error('Failed to save the updated project configuration.');
-            }
-
-            toast({ title: "Success", description: `Project "${selectedProject.projectName}" has been deleted.` });
-
-            setHeadlessProjects(updatedConfig);
-            setSelectedProject(updatedConfig.length > 0 ? updatedConfig[0] : undefined);
-
-        } catch (error) {
-            toast({ title: "Error Deleting Project", description: (error as Error).message, variant: "destructive" });
-        }
-    };
-
-    const handleCampaignFieldChange = (id: number, field: 'key' | 'value', value: string) => {
-        setCampaignFields(prevFields =>
-            prevFields.map(f => f.id === id ? { ...f, [field]: value } : f)
-        );
-    };
-
-    const addCampaignField = () => {
-        setCampaignFields(prev => [...prev, { id: Date.now(), key: '', value: '' }]);
-    };
-
-    const removeCampaignField = (id: number) => {
-        if (campaignFields.length > 1) {
-            setCampaignFields(prev => prev.filter(f => f.id !== id));
-        } else {
-            setCampaignFields([{ id: 1, key: '', value: '' }]);
-        }
-    };
-
-    const fetchRecipientsForActivity = async (activity: string, campaignId: string, siteId: string): Promise<CampaignRecipient[]> => {
-        const response = await fetch('/api/headless-get-recipients', {
+          const updatedConfig = headlessProjects.filter(p => p.siteId !== selectedProject.siteId);
+    
+          const updateResponse = await fetch('/api/headless-update-config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ siteId, campaignId, activity }),
-        });
-        if (!response.ok) throw new Error(`Failed to fetch ${activity.toLowerCase()} recipients.`);
-        const data = await response.json();
-        return (data.recipients || []).filter((r: CampaignRecipient) => r.emailAddress);
-    };
-
-    const handleFetchStats = async (campaignId: string) => {
-        if (!campaignId || !selectedProject) {
-            setStatistics(null);
-            return;
-        }
-        setIsFetchingStats(true);
-        setStatistics(null);
-        try {
-            const summaryResponse = await fetch('/api/headless-get-stats', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId, campaignIds: [campaignId] }),
-            });
-            if (!summaryResponse.ok) throw new Error('Failed to fetch campaign summary.');
-            const summaryData = await summaryResponse.json();
-            const summaryEmailStats = summaryData.statistics && summaryData.statistics.length > 0 ? summaryData.statistics[0].email : null;
-
-            const [delivered, opened, clicked, bounced, notSent] = await Promise.all([
-                fetchRecipientsForActivity('DELIVERED', campaignId, selectedProject.siteId),
-                fetchRecipientsForActivity('OPENED', campaignId, selectedProject.siteId),
-                fetchRecipientsForActivity('CLICKED', campaignId, selectedProject.siteId),
-                fetchRecipientsForActivity('BOUNCED', campaignId, selectedProject.siteId),
-                fetchRecipientsForActivity('NOT_SENT', campaignId, selectedProject.siteId),
-            ]);
-            
-            setStatistics({ 
-                delivered, 
-                opened, 
-                clicked, 
-                bounced, 
-                notSent, 
-                complained: summaryEmailStats ? summaryEmailStats.complained : 0,
-            });
-
+            body: JSON.stringify({ config: updatedConfig }),
+          });
+    
+          if (!updateResponse.ok) {
+            throw new Error('Failed to save the updated project configuration.');
+          }
+    
+          toast({ title: "Success", description: `Project "${selectedProject.projectName}" has been deleted.` });
+    
+          setHeadlessProjects(updatedConfig);
+          
+          setSelectedProject(updatedConfig.length > 0 ? updatedConfig[0] : undefined);
+    
         } catch (error) {
-            toast({ title: "Error Fetching Stats", description: (error as Error).message, variant: "destructive" });
-        } finally {
-            setIsFetchingStats(false);
+          toast({ title: "Error Deleting Project", description: (error as Error).message, variant: "destructive" });
         }
+    };
+    
+    const handleCampaignFieldChange = (id: number, field: 'key' | 'value', value: string) => {
+      setCampaignFields(prevFields => 
+        prevFields.map(f => f.id === id ? { ...f, [field]: value } : f)
+      );
+    };
+  
+    const addCampaignField = () => {
+      setCampaignFields(prev => [...prev, { id: Date.now(), key: '', value: '' }]);
+    };
+  
+    const removeCampaignField = (id: number) => {
+      if (campaignFields.length > 1) {
+          setCampaignFields(prev => prev.filter(f => f.id !== id));
+      } else {
+          setCampaignFields([{ id: 1, key: '', value: '' }]);
+      }
+    };
+  
+    const fetchRecipientsForActivity = async (activity: string, campaignId: string, siteId: string): Promise<CampaignRecipient[]> => {
+      const response = await fetch('/api/headless-get-recipients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ siteId, campaignId, activity }),
+      });
+      if (!response.ok) throw new Error(`Failed to fetch ${activity.toLowerCase()} recipients.`);
+      const data = await response.json();
+      return (data.recipients || []).filter((r: CampaignRecipient) => r.emailAddress);
+    };
+  
+    const handleFetchStats = async (campaignId: string) => {
+      if (!campaignId || !selectedProject) {
+        setStatistics(null);
+        return;
+      }
+      setIsFetchingStats(true);
+      setStatistics(null);
+      try {
+          const summaryResponse = await fetch('/api/headless-get-stats', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ siteId: selectedProject.siteId, campaignIds: [campaignId] }),
+          });
+          if (!summaryResponse.ok) throw new Error('Failed to fetch campaign summary.');
+          const summaryData = await summaryResponse.json();
+          const summaryEmailStats = summaryData.statistics && summaryData.statistics.length > 0 ? summaryData.statistics[0].email : null;
+  
+          const [delivered, opened, clicked, bounced, notSent] = await Promise.all([
+              fetchRecipientsForActivity('DELIVERED', campaignId, selectedProject.siteId),
+              fetchRecipientsForActivity('OPENED', campaignId, selectedProject.siteId),
+              fetchRecipientsForActivity('CLICKED', campaignId, selectedProject.siteId),
+              fetchRecipientsForActivity('BOUNCED', campaignId, selectedProject.siteId),
+              fetchRecipientsForActivity('NOT_SENT', campaignId, selectedProject.siteId),
+          ]);
+          
+          setStatistics({ 
+              delivered, 
+              opened, 
+              clicked, 
+              bounced, 
+              notSent, 
+              complained: summaryEmailStats ? summaryEmailStats.complained : 0,
+          });
+  
+      } catch (error) {
+          toast({ title: "Error Fetching Stats", description: (error as Error).message, variant: "destructive" });
+      } finally {
+          setIsFetchingStats(false);
+      }
     };
     
     useEffect(() => {
-        if (selectedProject) {
-            fetchSenderDetails(selectedProject.siteId);
-            setSelectedCampaignId('');
-            setStatistics(null);
-        }
+      if (selectedProject) {
+          fetchSenderDetails(selectedProject.siteId);
+          setSelectedCampaignId('');
+          setStatistics(null);
+      }
     }, [selectedProject]);
     
     const handleImport = (siteId: string) => {
-        const job = jobs[siteId] || initialJobState;
-        if (!job.emails) {
-            toast({ title: "No Emails", description: "Please enter emails to import.", variant: "destructive" });
-            return;
-        }
-        jobManager.startJob(siteId, job.emails, job.delaySeconds);
+      const job = jobs[siteId] || initialJobState;
+      if (!job.emails) {
+          toast({ title: "No Emails", description: "Please enter emails to import.", variant: "destructive" });
+          return;
+      }
+      jobManager.startJob(siteId, job.emails, job.delaySeconds);
     };
     
     const handlePauseResume = (siteId: string) => {
-        const job = jobs[siteId];
-        if (!job || !job.isLoading) return;
-
-        if (job.isPaused) {
-            jobManager.resumeJob(siteId);
-            toast({ title: 'Job Resumed', description: 'The import will continue.' });
-        } else {
-            jobManager.pauseJob(siteId);
-            toast({ title: 'Job Paused', description: 'The import will pause.' });
-        }
+      const job = jobs[siteId];
+      if (!job || !job.isLoading) return;
+  
+      if (job.isPaused) {
+          jobManager.resumeJob(siteId);
+          toast({ title: 'Job Resumed', description: 'The import will continue.' });
+      } else {
+          jobManager.pauseJob(siteId);
+          toast({ title: 'Job Paused', description: 'The import will pause.' });
+      }
     };
-
+  
     const handleEndJob = (siteId: string) => {
-        jobManager.cancelJob(siteId);
+      jobManager.cancelJob(siteId);
     };
-
+  
     const handleSearch = async () => {
         if (!searchQuery) {
-            toast({ title: "Search query is empty", variant: "destructive" });
-            return;
+          toast({ title: "Search query is empty", variant: "destructive" });
+          return;
         }
         setIsSearching(true);
         setSearchResults([]);
@@ -524,57 +525,57 @@ export function HeadlessImportPage() {
             setIsSearching(false);
         }
     };
-
+  
     const handleDelete = async () => {
-        if (selectedMembers.length === 0) {
-            toast({ title: "No members selected", variant: "destructive" });
-            return;
-        }
-        setIsDeleting(true);
-        try {
-            const membersToDelete = searchResults
-                .filter(member => selectedMembers.includes(member.id))
-                .map(member => ({ memberId: member.id, contactId: member.contactId }));
-
-            const response = await fetch('/api/headless-delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject?.siteId, membersToDelete }),
-            });
-            if (!response.ok) throw new Error(`Error: ${response.statusText}`);
-            toast({ title: "Members deleted successfully" });
-            setSearchResults(searchResults.filter(member => !selectedMembers.includes(member.id)));
-            setSelectedMembers([]);
-        } catch (error) {
-            toast({ title: "Deletion failed", description: (error as Error).message, variant: "destructive" });
-        } finally {
-            setIsDeleting(false);
-        }
+      if (selectedMembers.length === 0) {
+          toast({ title: "No members selected", variant: "destructive" });
+          return;
+      }
+      setIsDeleting(true);
+      try {
+          const membersToDelete = searchResults
+              .filter(member => selectedMembers.includes(member.id))
+              .map(member => ({ memberId: member.id, contactId: member.contactId }));
+  
+          const response = await fetch('/api/headless-delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ siteId: selectedProject?.siteId, membersToDelete }),
+          });
+          if (!response.ok) throw new Error(`Error: ${response.statusText}`);
+          toast({ title: "Members deleted successfully" });
+          setSearchResults(searchResults.filter(member => !selectedMembers.includes(member.id)));
+          setSelectedMembers([]);
+      } catch (error) {
+          toast({ title: "Deletion failed", description: (error as Error).message, variant: "destructive" });
+      } finally {
+          setIsDeleting(false);
+      }
     };
-
+  
     const handleListAllMembers = async () => {
-        if (!selectedProject) return;
-        setAllMembersDialogOpen(true);
-        setIsFetchingAllMembers(true);
-        setAllMembers([]);
-        setSelectedAllMembers([]);
-        try {
-            const response = await fetch('/api/headless-list-all', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId }),
-            });
-            if (!response.ok) throw new Error('Failed to fetch the member list.');
-            const data = await response.json();
-            setAllMembers(data.members || []);
-        } catch (error) {
-            toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
-            setAllMembersDialogOpen(false);
-        } finally {
-            setIsFetchingAllMembers(false);
-        }
+      if (!selectedProject) return;
+      setAllMembersDialogOpen(true);
+      setIsFetchingAllMembers(true);
+      setAllMembers([]);
+      setSelectedAllMembers([]);
+      try {
+        const response = await fetch('/api/headless-list-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ siteId: selectedProject.siteId }),
+        });
+        if (!response.ok) throw new Error('Failed to fetch the member list.');
+        const data = await response.json();
+        setAllMembers(data.members || []);
+      } catch (error) {
+        toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
+        setAllMembersDialogOpen(false);
+      } finally {
+        setIsFetchingAllMembers(false);
+      }
     };
-
+  
     const handleDeleteAllSelected = async () => {
         if (selectedAllMembers.length === 0) {
             toast({ title: "No members selected", variant: "destructive" });
@@ -610,144 +611,92 @@ export function HeadlessImportPage() {
             setIsDeletingAll(false);
         }
     };
-
+  
     const handleValidateLinks = async () => {
-        if (!htmlToValidate || !selectedProject) {
-            toast({ title: "Input Required", description: "Please select a project and enter some HTML to validate.", variant: "destructive" });
-            return;
-        }
-        setIsLinkValidating(true);
-        setValidationResults([]);
-        try {
-            const response = await fetch('/api/headless-validate-links', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId, html: htmlToValidate }),
-            });
-            if (!response.ok) throw new Error('Failed to validate links.');
-            const data = await response.json();
-            setValidationResults(data.blacklistedLinks || []);
-            toast({ title: "Validation Complete", description: `Found ${data.blacklistedLinks?.length || 0} blacklisted links.`});
-        } catch (error) {
-            toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
-        } finally {
-            setIsLinkValidating(false);
-        }
+      if (!htmlToValidate || !selectedProject) {
+          toast({ title: "Input Required", description: "Please select a project and enter some HTML to validate.", variant: "destructive" });
+          return;
+      }
+      setIsLinkValidating(true);
+      setValidationResults([]);
+      try {
+          const response = await fetch('/api/headless-validate-links', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ siteId: selectedProject.siteId, html: htmlToValidate }),
+          });
+          if (!response.ok) throw new Error('Failed to validate links.');
+          const data = await response.json();
+          setValidationResults(data.blacklistedLinks || []);
+          toast({ title: "Validation Complete", description: `Found ${data.blacklistedLinks?.length || 0} blacklisted links.`});
+      } catch (error) {
+          toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
+      } finally {
+          setIsLinkValidating(false);
+      }
     };
-
+  
     const handleValidateUrl = async () => {
-        if (!urlToValidate || !selectedProject) {
-            toast({ title: "Input Required", description: "Please select a project and enter a URL to validate.", variant: "destructive" });
-            return;
-        }
-        setIsUrlValidating(true);
-        setUrlValidationResult(null);
-        try {
-            const response = await fetch('/api/headless-validate-link', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId, url: urlToValidate }),
-            });
-            if (!response.ok) throw new Error('Failed to validate the URL.');
-            const data = await response.json();
-            setUrlValidationResult(data.valid 
-                ? `✅ This link is valid and safe to use. : ${data.valid}` 
-                : `❌ This link is blacklisted or invalid. : ${data.valid}`
-            );
-        } catch (error) {
-            setUrlValidationResult(`Error: ${(error as Error).message}`);
-        } finally {
-            setIsUrlValidating(false);
-        }
+      if (!urlToValidate || !selectedProject) {
+          toast({ title: "Input Required", description: "Please select a project and enter a URL to validate.", variant: "destructive" });
+          return;
+      }
+      setIsUrlValidating(true);
+      setUrlValidationResult(null);
+      try {
+          const response = await fetch('/api/headless-validate-link', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ siteId: selectedProject.siteId, url: urlToValidate }),
+          });
+          if (!response.ok) throw new Error('Failed to validate the URL.');
+          const data = await response.json();
+          setUrlValidationResult(data.valid 
+              ? `✅ This link is valid and safe to use. : ${data.valid}` 
+              : `❌ This link is blacklisted or invalid. : ${data.valid}`
+          );
+      } catch (error) {
+          setUrlValidationResult(`Error: ${(error as Error).message}`);
+      } finally {
+          setIsUrlValidating(false);
+      }
     };
     
     const handleSendTestEmail = async () => {
-        if (!selectedCampaignId) {
-            toast({ title: "No Campaign Selected", description: "Please select a campaign from the statistics section first.", variant: "destructive" });
-            return;
-        }
-        if (!testEmailAddress) {
-            toast({ title: "Recipient Email Required", description: "Please enter an email address to send the test to.", variant: "destructive" });
-            return;
-        }
-        setIsSendingTest(true);
-        setTestEmailResponse('');
-        try {
-            const response = await fetch('/api/headless-send-test-email', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    siteId: selectedProject?.siteId, 
-                    campaignId: selectedCampaignId,
-                    emailSubject: testEmailSubject,
-                    toEmailAddress: testEmailAddress,
-                }),
-            });
-            const responseData = await response.json();
-            if (!response.ok) {
-                 throw new Error(responseData.message || 'Failed to send test email.');
-            }
-            setTestEmailResponse(JSON.stringify(responseData, null, 2));
-            toast({ title: "Test Email Sent", description: `Successfully sent a test to ${testEmailAddress}.`});
-        } catch (error) {
-            setTestEmailResponse(`Error: ${(error as Error).message}`);
-            toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
-        } finally {
-            setIsSendingTest(false);
-        }
+      if (!selectedCampaignId) {
+          toast({ title: "No Campaign Selected", description: "Please select a campaign from the statistics section first.", variant: "destructive" });
+          return;
+      }
+      if (!testEmailAddress) {
+          toast({ title: "Recipient Email Required", description: "Please enter an email address to send the test to.", variant: "destructive" });
+          return;
+      }
+      setIsSendingTest(true);
+      setTestEmailResponse('');
+      try {
+          const response = await fetch('/api/headless-send-test-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                  siteId: selectedProject?.siteId, 
+                  campaignId: selectedCampaignId,
+                  emailSubject: testEmailSubject,
+                  toEmailAddress: testEmailAddress,
+              }),
+          });
+          const responseData = await response.json();
+          if (!response.ok) {
+               throw new Error(responseData.message || 'Failed to send test email.');
+          }
+          setTestEmailResponse(JSON.stringify(responseData, null, 2));
+          toast({ title: "Test Email Sent", description: `Successfully sent a test to ${testEmailAddress}.`});
+      } catch (error) {
+          setTestEmailResponse(`Error: ${(error as Error).message}`);
+          toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
+      } finally {
+          setIsSendingTest(false);
+      }
     };
     
     const emailCount = currentJob?.emails.split(/[,\s\n]+/).filter(e => e.trim().includes('@')).length || 0;
     const availableCampaigns = selectedProject?.campaigns ? Object.entries(selectedProject.campaigns) : [];
-
-    return (
-        <div className="min-h-screen bg-gradient-subtle">
-            <Navbar />
-            <div className="container mx-auto px-4 pt-24 pb-12">
-                <div className="max-w-4xl mx-auto space-y-8">
-                    {/* ... (Your other JSX) */}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-interface StatCardProps {
-    icon: React.ElementType;
-    title: string;
-    recipients?: CampaignRecipient[];
-    count?: number;
-    activity?: string;
-    onRecipientClick?: (data: {title: string, recipients: CampaignRecipient[]}) => void;
-}
-
-function StatCard({ icon: Icon, title, recipients, count, activity, onRecipientClick }: StatCardProps) {
-    const value = typeof count === 'number' ? count : recipients?.length ?? 0;
-    const canViewRecipients = onRecipientClick && recipients && activity;
-
-    return (
-        <Card className="p-4">
-            <CardHeader className="p-0 flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{title}</CardTitle>
-                <Icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="p-0">
-                <div className="text-2xl font-bold">{value}</div>
-                {canViewRecipients ? (
-                    <Button 
-                        variant="link" 
-                        className="p-0 h-auto text-xs text-muted-foreground" 
-                        onClick={() => { 
-                            onRecipientClick({ title: activity, recipients: recipients }); 
-                            document.getElementById('recipient-dialog-trigger')?.click(); 
-                        }}
-                    >
-                        View Recipients
-                    </Button>
-                ) : (
-                    <div className="h-6 text-xs text-muted-foreground/50">—</div>
-                )}
-            </CardContent>
-        </Card>
-    );
-}
