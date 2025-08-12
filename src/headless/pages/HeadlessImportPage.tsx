@@ -169,6 +169,31 @@ export function HeadlessImportPage() {
     };
   }, []); // Empty dependency array means this runs only once on mount
 
+  useEffect(() => {
+    if (!isDeleteJobRunning || !selectedProject) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const response = await fetch('/api/headless-job-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ siteId: selectedProject.siteId }),
+        });
+        const data = await response.json();
+        if (data.status === 'running') {
+          setDeleteProgress({ processed: data.processed, total: data.total });
+        } else if (data.status === 'complete' || data.status === 'idle') {
+          setIsDeleteJobRunning(false);
+          setDeleteProgress({ processed: data.total, total: data.total });
+          toast({ title: "Bulk delete complete!", description: `Finished deleting ${data.total} members.` });
+        }
+      } catch (error) {
+        console.error("Failed to fetch delete job status:", error);
+      }
+    }, 2000); // Poll every 2 seconds
+
+    return () => clearInterval(intervalId);
+  }, [isDeleteJobRunning, selectedProject]);
 
 
 //---------------------------------
@@ -573,6 +598,7 @@ export function HeadlessImportPage() {
         toast({ title: "Deletion Job Started", description: data.message });
         setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
         setSelectedAllMembers([]);
+        setIsDeleteJobRunning(true);
     } catch (error: any) {
         toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
     } finally {
@@ -723,6 +749,20 @@ export function HeadlessImportPage() {
                 </div>
             </div>
           
+            {isDeleteJobRunning && (
+                <Card className="bg-gradient-card shadow-card border-primary/10">
+                    <CardHeader>
+                        <CardTitle>Bulk Deletion in Progress</CardTitle>
+                        <CardDescription>
+                            Deleting {deleteProgress.processed} of {deleteProgress.total} members...
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <Progress value={(deleteProgress.processed / deleteProgress.total) * 100} />
+                    </CardContent>
+                </Card>
+            )}
+
             {(isSearching || searchResults.length > 0) && (
                 <Card className="bg-gradient-card shadow-card border-primary/10">
                     <CardHeader className="flex flex-row justify-between items-center">
