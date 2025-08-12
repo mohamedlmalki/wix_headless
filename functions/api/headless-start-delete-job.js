@@ -27,14 +27,13 @@ async function pollWixJobStatus(jobId, project) {
   let job, jobStatus = 'IN_PROGRESS';
 
   while (jobStatus === 'IN_PROGRESS' || jobStatus === 'ACCEPTED') {
-    await delay(3000); // Wait 3 seconds before checking status
+    await delay(3000);
     
     const response = await fetch(wixApiUrl, {
       method: 'GET',
       headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
     });
     
-    // ★ FIX: If we get a 404, it means the job finished so fast it's already gone. Treat this as a success.
     if (response.status === 404) {
         console.log(`Job ${jobId} finished and was not found (404), assuming completion.`);
         return { status: 'COMPLETED' };
@@ -77,16 +76,19 @@ export async function onRequestPost(context) {
                 const totalSteps = memberIdChunks.length + contactEmailChunks.length;
                 let stepsCompleted = 0;
 
-                // --- STEP 1: Bulk Delete All Member Chunks ---
+                // --- STEP 1: Bulk Delete All Member Chunks using the FILTER method ---
                 for (let i = 0; i < memberIdChunks.length; i++) {
                     stepsCompleted++;
                     currentState = { status: 'running', processed: stepsCompleted, total: totalSteps, step: `Deleting member batch ${i + 1} of ${memberIdChunks.length}` };
                     await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
                     
-                    const memberDeleteRes = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
+                    const chunk = memberIdChunks[i];
+                    // ★★★ THE KEY CHANGE IS HERE ★★★
+                    // We are now using the filter-based endpoint instead of the ID-based one.
+                    const memberDeleteRes = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete-by-filter', {
                         method: 'POST',
                         headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ memberIds: memberIdChunks[i] })
+                        body: JSON.stringify({ filter: { "_id": { "$in": chunk } } })
                     });
                     
                     if (!memberDeleteRes.ok) {
@@ -95,7 +97,7 @@ export async function onRequestPost(context) {
                     }
                 }
 
-                // ★ FIX: Reduced delay to 1 second as requested
+                // --- Add delay for eventual consistency ---
                 currentState = { ...currentState, step: `Finalizing member deletion... (waiting 1s)` };
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
                 await delay(1000);
