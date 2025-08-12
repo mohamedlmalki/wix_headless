@@ -1,15 +1,11 @@
-// Handles POST requests to /api/headless-register
 export async function onRequestPost({ request, env }) {
   try {
-    const { siteId, email } = await request.json();
+    const { siteId, html } = await request.json();
 
-    // Fetch the configuration from the KV store
     const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
     if (!projectsJson) {
       throw new Error("Could not retrieve project configurations.");
     }
-
-    // Find the correct project configuration
     const project = projectsJson.find(p => p.siteId === siteId);
 
     if (!project) {
@@ -19,12 +15,8 @@ export async function onRequestPost({ request, env }) {
       });
     }
 
-    const wixApiUrl = 'https://www.wixapis.com/_api/iam/authentication/v2/register';
-    const requestBody = JSON.stringify({
-      loginId: { email },
-      password: "Password123!",
-      captcha_tokens: []
-    });
+    const wixApiUrl = 'https://www.wixapis.com/email-marketing/v1/campaign-validation/validate-html-links';
+    const requestBody = JSON.stringify({ html });
 
     const wixResponse = await fetch(wixApiUrl, {
       method: 'POST',

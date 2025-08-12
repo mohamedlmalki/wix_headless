@@ -1,15 +1,11 @@
-// Handles POST requests to /api/headless-register
 export async function onRequestPost({ request, env }) {
   try {
-    const { siteId, email } = await request.json();
+    const { siteId, campaignIds } = await request.json();
 
-    // Fetch the configuration from the KV store
     const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
     if (!projectsJson) {
       throw new Error("Could not retrieve project configurations.");
     }
-
-    // Find the correct project configuration
     const project = projectsJson.find(p => p.siteId === siteId);
 
     if (!project) {
@@ -19,21 +15,23 @@ export async function onRequestPost({ request, env }) {
       });
     }
 
-    const wixApiUrl = 'https://www.wixapis.com/_api/iam/authentication/v2/register';
-    const requestBody = JSON.stringify({
-      loginId: { email },
-      password: "Password123!",
-      captcha_tokens: []
-    });
+    if (!campaignIds || !Array.isArray(campaignIds)) {
+      return new Response(JSON.stringify({ message: "Request must include a 'campaignIds' array." }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-    const wixResponse = await fetch(wixApiUrl, {
-      method: 'POST',
+    // Construct the URL with query parameters
+    const apiUrl = new URL('https://www.wixapis.com/email-marketing/v1/campaigns/statistics');
+    campaignIds.forEach(id => apiUrl.searchParams.append('campaignIds', id));
+
+    const wixResponse = await fetch(apiUrl.toString(), {
+      method: 'GET',
       headers: {
-        'Content-Type': 'application/json',
         'Authorization': project.apiKey,
         'wix-site-id': project.siteId,
-      },
-      body: requestBody
+      }
     });
 
     const data = await wixResponse.json();

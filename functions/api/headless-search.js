@@ -1,11 +1,15 @@
-import headlessProjects from '../../src/headless/config/headless-config.json';
-
 // Handles POST requests to /api/headless-search
-export async function onRequestPost({ request }) {
+export async function onRequestPost({ request, env }) {
   try {
     const { siteId, query } = await request.json();
 
-    const project = headlessProjects.find(p => p.siteId === siteId);
+    // Fetch the configuration from the KV store
+    const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
+    if (!projectsJson) {
+      throw new Error("Could not retrieve project configurations.");
+    }
+
+    const project = projectsJson.find(p => p.siteId === siteId);
 
     if (!project) {
       return new Response(JSON.stringify({ message: `Project configuration not found for siteId: ${siteId}` }), {

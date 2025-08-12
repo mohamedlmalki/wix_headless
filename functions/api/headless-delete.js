@@ -1,14 +1,18 @@
-import headlessProjects from '../../src/headless/config/headless-config.json';
-
 // Simple delay function
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Handles POST requests to /api/headless-delete
-export async function onRequestPost({ request }) {
+export async function onRequestPost({ request, env }) {
   try {
     const { siteId, membersToDelete } = await request.json();
 
-    const project = headlessProjects.find(p => p.siteId === siteId);
+    // Fetch the configuration from the KV store
+    const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
+    if (!projectsJson) {
+      throw new Error("Could not retrieve project configurations.");
+    }
+
+    const project = projectsJson.find(p => p.siteId === siteId);
 
     if (!project) {
       return new Response(JSON.stringify({ message: `Project configuration not found for siteId: ${siteId}` }), {
@@ -45,7 +49,6 @@ export async function onRequestPost({ request }) {
         });
         if (!memberRes.ok) throw new Error('Failed to delete member from Wix.');
 
-        // It's good practice to wait a moment between API calls
         await sleep(500);
 
         // Step 2: Delete the Contact
