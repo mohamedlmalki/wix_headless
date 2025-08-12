@@ -19,21 +19,28 @@ const initialJobState: JobState = {
     processedEmails: 0, jobCancelled: false,
 };
 
-// ★★★ NEW: Initial state for the Campaign Statistics page ★★★
 const initialCampaignStatsState: CampaignStatsState = {
-    selectedProject: null,
-    selectedCampaignId: '',
-    selectedActivity: '',
-    recipients: [],
-    summaryStats: null,
+    selectedProject: null, selectedCampaignId: '', selectedActivity: '',
+    recipients: [], summaryStats: null,
 };
+
+// ★★★ NEW: Define the shape of the deletion job state ★★★
+export interface DeleteJobState {
+    isDeleteJobRunning: boolean;
+    deleteProgress: { processed: number; total: number };
+}
 
 const App = () => {
     // State for the Import page jobs
     const [jobs, setJobs] = useState<Record<string, JobState>>({});
-
-    // ★★★ NEW: State for the Campaign Statistics page ★★★
+    // State for the Campaign Statistics page
     const [campaignStats, setCampaignStats] = useState<CampaignStatsState>(initialCampaignStatsState);
+    // ★★★ NEW: State for the Deletion job progress ★★★
+    const [deleteJobState, setDeleteJobState] = useState<DeleteJobState>({
+        isDeleteJobRunning: false,
+        deleteProgress: { processed: 0, total: 0 },
+    });
+
 
     useEffect(() => {
         const handleJobUpdate = (data: UpdatePayload) => {
@@ -55,9 +62,13 @@ const App = () => {
         }));
     };
     
-    // ★★★ NEW: Handler to update the Campaign Statistics state ★★★
     const handleCampaignStatsChange = (updates: Partial<CampaignStatsState>) => {
         setCampaignStats(prev => ({ ...prev, ...updates }));
+    };
+
+    // ★★★ NEW: Handler to update the Deletion job state ★★★
+    const handleDeleteJobStateChange = (updates: Partial<DeleteJobState>) => {
+        setDeleteJobState(prev => ({ ...prev, ...updates }));
     };
 
     return (
@@ -68,11 +79,16 @@ const App = () => {
                 <BrowserRouter>
                     <Routes>
                         <Route path="/" element={<Index />} />
+                        {/* ★★★ UPDATE: Pass the delete job state and handler down ★★★ */}
                         <Route
                             path="/headless-import"
-                            element={<HeadlessImportPage jobs={jobs} onJobStateChange={handleJobStateChange} />}
+                            element={<HeadlessImportPage 
+                                jobs={jobs} 
+                                onJobStateChange={handleJobStateChange}
+                                deleteJobState={deleteJobState}
+                                onDeleteJobStateChange={handleDeleteJobStateChange}
+                            />}
                         />
-                        {/* ★★★ UPDATE: Pass the state and handler to the CampaignStatsPage ★★★ */}
                         <Route
                             path="/campaign-stats"
                             element={<CampaignStatsPage statsState={campaignStats} onStatsStateChange={handleCampaignStatsChange} />}
