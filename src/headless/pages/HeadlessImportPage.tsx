@@ -327,6 +327,44 @@ export function HeadlessImportPage() {
     }
   };
   
+  //----------------------------
+  
+  const handleDeleteProject = async () => {
+    if (!selectedProject) {
+      toast({ title: "No Project Selected", description: "Please select a project to delete.", variant: "destructive" });
+      return;
+    }
+
+    try {
+      // Create a new list of projects that excludes the selected one
+      const updatedConfig = headlessProjects.filter(p => p.siteId !== selectedProject.siteId);
+
+      // Send the new, shorter list to the backend to be saved
+      const updateResponse = await fetch('/api/headless-update-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: updatedConfig }),
+      });
+
+      if (!updateResponse.ok) {
+        throw new Error('Failed to save the updated project configuration.');
+      }
+
+      toast({ title: "Success", description: `Project "${selectedProject.projectName}" has been deleted.` });
+
+      // Update the local state to immediately remove the project from the dropdown
+      setHeadlessProjects(updatedConfig);
+      
+      // If there are other projects left, select the first one. Otherwise, clear the selection.
+      setSelectedProject(updatedConfig.length > 0 ? updatedConfig[0] : undefined);
+
+    } catch (error) {
+      toast({ title: "Error Deleting Project", description: (error as Error).message, variant: "destructive" });
+    }
+  };
+  
+  //----------------------------
+  
   const handleCampaignFieldChange = (id: number, field: 'key' | 'value', value: string) => {
     setCampaignFields(prevFields => 
       prevFields.map(f => f.id === id ? { ...f, [field]: value } : f)
@@ -713,6 +751,30 @@ export function HeadlessImportPage() {
                         <div className="flex gap-2">
                             <Button variant="outline" size="sm" onClick={() => handleOpenDialog('add')}><PlusCircle className="mr-2 h-4 w-4" /> Add</Button>
                             <Button variant="outline" size="sm" onClick={() => handleOpenDialog('edit')} disabled={!selectedProject}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>
+                            {/* START: Add this new block of code */}
+                            <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                    <Button variant="destructive" size="sm" disabled={!selectedProject}><Trash2 className="mr-2 h-4 w-4" /> Delete</Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                        <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                            This will permanently delete the project "{selectedProject?.projectName}". This action cannot be undone.
+                                        </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => {
+                                            // We will create this function in the next step
+                                            handleDeleteProject();
+                                        }}>
+                                            Continue
+                                        </AlertDialogAction>
+                                    </AlertDialogFooter>
+                                </AlertDialogContent>
+                            </AlertDialog>
+                            {/* END: Add this new block of code */}
                         </div>
                     </CardHeader>
                     <CardContent>
