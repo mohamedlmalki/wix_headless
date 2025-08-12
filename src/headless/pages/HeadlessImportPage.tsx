@@ -66,6 +66,11 @@ const initialJobState: JobState = {
 
 
 export function HeadlessImportPage() {
+   
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState({ processed: 0, total: 0 });
+  const [isDeleteJobRunning, setIsDeleteJobRunning] = useState(false);
+   
   const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
   const [selectedProject, setSelectedProject] = useState<HeadlessProject | undefined>(headlessProjects[0]);
   
@@ -96,7 +101,6 @@ export function HeadlessImportPage() {
   const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [isFetchingAllMembers, setIsFetchingAllMembers] = useState(false);
   const [selectedAllMembers, setSelectedAllMembers] = useState<string[]>([]);
-  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [filterQuery, setFilterQuery] = useState("");
   const [allMembersFilterQuery, setAllMembersFilterQuery] = useState("");
   const [importFilter, setImportFilter] = useState<'all' | 'Success' | 'Failed'>('all');
