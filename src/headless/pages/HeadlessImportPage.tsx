@@ -109,26 +109,10 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
         fetchProjects();
     }, [selectedProject, toast]);
 
-// This is the useEffect hook you need to replace in HeadlessImportPage.tsx
-
     useEffect(() => {
         if (!isDeleteJobRunning || !selectedProject) return;
 
-        // ★★★ THE FINAL FIX ★★★
-        // This flag prevents polling immediately after a job starts.
-        let canPoll = false;
-        
-        // Wait 2.5 seconds before the first poll to avoid the race condition.
-        const initialDelay = setTimeout(() => {
-            canPoll = true;
-        }, 2500);
-
         const intervalId = setInterval(async () => {
-            // Only poll if the initial delay has passed.
-            if (!canPoll) {
-                return;
-            }
-
             try {
                 const response = await fetch('/api/headless-job-status', {
                     method: 'POST',
@@ -158,14 +142,7 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
                 console.error("Failed to fetch delete job status:", error);
                 onDeleteJobStateChange({ isDeleteJobRunning: false });
             }
-        }, 2000); // The polling interval remains 2 seconds.
-
-        // Cleanup function to clear timers when the component unmounts
-        return () => {
-            clearTimeout(initialDelay);
-            clearInterval(intervalId);
-        };
-    }, [isDeleteJobRunning, selectedProject, toast, onDeleteJobStateChange]);
+        }, 2000);
 
 
 
