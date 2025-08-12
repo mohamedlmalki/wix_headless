@@ -52,28 +52,95 @@ async function startDeletionProcess(project, membersToDelete, jobsKV) {
 }
 
 // This is the main function that responds to the frontend
-export async function onRequestPost({ request, env, waitUntil }) {
-  try {
-    const { siteId, membersToDelete } = await request.json();
+// The main function that handles the entire deletion process
+export async function onRequestPost(context) {
+    const { request, env } = context;
 
-    const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
-    if (!projectsJson) throw new Error("Could not retrieve project configurations.");
-    
-    const project = projectsJson.find(p => p.siteId === siteId);
-    if (!project) return new Response(JSON.stringify({ message: `Project not found` }), { status: 404 });
+    try {
+        const { siteId, membersToDelete } = await request.json();
 
-    if (!membersToDelete || !Array.isArray(membersToDelete) || membersToDelete.length === 0) {
-        return new Response(JSON.stringify({ message: 'Request must include a non-empty "membersToDelete" array.'}), { status: 400 });
+        // 1. Get the project config to find the API key
+        const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
+        if (!projectsJson) throw new Error("Could not retrieve project configurations.");
+        const project = projectsJson.find(p => p.siteId === siteId);
+        if (!project) {
+            return new Response(JSON.stringify({ message: `Project configuration not found for siteId: ${siteId}` }), { status: 404 });
+        }
+        
+        const jobKey = `delete_job_${siteId}`;
+
+        const doDeletion = async () => {
+            // Initialize the job status, including an error field
+            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({
+                status: 'running',
+                processed: 0,
+                total: membersToDelete.length,
+                error: null 
+            }));
+
+            let processedCount = 0;
+            for (const member of membersToDelete) {
+                const deleteMemberResponse = await fetch(`https://www.wixapis.com/members/v1/members/${member.memberId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': project.apiKey,
+                        'wix-site-id': project.siteId,
+                    }
+                });
+
+                // Check specifically for the "Too Many Requests" error status
+                if (deleteMemberResponse.status === 429) {
+                    const errorDetails = await deleteMemberResponse.json();
+                    // Update the job status in KV with a specific "stuck" status and error message
+                    await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({
+                        status: 'stuck', 
+                        processed: processedCount,
+                        total: membersToDelete.length,
+                        error: `Rate limit hit. Wix API says: ${errorDetails.message || 'Too Many Requests'}. Job stuck at ${processedCount} of ${membersToDelete.length}.`
+                    }));
+                    return; // Stop the deletion process
+                }
+
+                // Also delete the associated contact if a contactId is provided
+                if (member.contactId) {
+                    await fetch(`https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`, {
+                        method: 'DELETE',
+                        headers: { 'Authorization': project.apiKey }
+                    });
+                }
+                
+                processedCount++;
+                // Update the progress in KV storage
+                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({
+                    status: 'running',
+                    processed: processedCount,
+                    total: membersToDelete.length,
+                    error: null
+                }));
+            }
+            
+            // If the loop completes without errors, mark the job as complete
+            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({
+                status: 'complete',
+                processed: processedCount,
+                total: membersToDelete.length,
+                error: null
+            }));
+        };
+
+        // Run the deletion task in the background
+        context.waitUntil(doDeletion());
+
+        // Return an immediate success response to the user
+        return new Response(JSON.stringify({ success: true, message: "Deletion job started successfully." }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+        });
+
+    } catch (e) {
+        return new Response(JSON.stringify({ message: 'An error occurred.', error: e.message }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+        });
     }
-    
-    // Pass the jobs KV namespace to the background process
-    waitUntil(startDeletionProcess(project, membersToDelete, env.WIX_HEADLESS_JOBS));
-
-    return new Response(JSON.stringify({ message: `Deletion job for ${membersToDelete.length} members has been queued.` }), {
-      status: 202,
-    });
-
-  } catch (e) {
-    return new Response(JSON.stringify({ message: 'An error occurred.', error: e.message }), { status: 500 });
-  }
 }

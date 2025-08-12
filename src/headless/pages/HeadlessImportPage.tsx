@@ -15,7 +15,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from '@/components/ui/progress';
 import { jobManager, JobState } from '../lib/JobManager';
-import { DeleteJobState } from '../../App'; // ★★★ Import the new type ★★★
+import { DeleteJobState } from '../../App';
 
 const exportEmailsToTxt = (data: any[], filename: string) => {
     const emailKeys = ['email', 'loginEmail', 'emailAddress'];
@@ -55,7 +55,6 @@ const initialJobState: JobState = {
     jobCancelled: false,
 };
 
-// ★★★ UPDATE: Add the delete job state to the props interface ★★★
 interface HeadlessImportPageProps {
   jobs: Record<string, JobState>;
   onJobStateChange: (siteId: string, updates: Partial<JobState>) => void;
@@ -65,18 +64,9 @@ interface HeadlessImportPageProps {
 
 export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChange, deleteJobState, onDeleteJobStateChange }: HeadlessImportPageProps) {
     const { isDeleteJobRunning, deleteProgress } = deleteJobState;
-
-    // ★★★ REMOVED: Local state for deletion job is now managed globally ★★★
-    // const [isDeletingAll, setIsDeletingAll] = useState(false); 
-    // const [deleteProgress, setDeleteProgress] = useState({ processed: 0, total: 0 });
-    // const [isDeleteJobRunning, setIsDeleteJobRunning] = useState(false);
-    
-    // This state can remain local as it's not needed across pages
     const [isSubmittingDelete, setIsSubmittingDelete] = useState(false);
-
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | undefined>(undefined);
-
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<Member[]>([]);
     const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
@@ -100,17 +90,14 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
     const [filterQuery, setFilterQuery] = useState("");
     const [allMembersFilterQuery, setAllMembersFilterQuery] = useState("");
     const [importFilter, setImportFilter] = useState<'all' | 'Success' | 'Failed'>('all');
-    
     const [isLinkValidatorOpen, setLinkValidatorOpen] = useState(false);
     const [htmlToValidate, setHtmlToValidate] = useState('');
     const [validationResults, setValidationResults] = useState<string[]>([]);
     const [isLinkValidating, setIsLinkValidating] = useState(false);
-    
     const [isUrlValidatorOpen, setUrlValidatorOpen] = useState(false);
     const [urlToValidate, setUrlToValidate] = useState('');
     const [urlValidationResult, setUrlValidationResult] = useState<string | null>(null);
     const [isUrlValidating, setIsUrlValidating] = useState(false);
-
     const [isTestEmailOpen, setTestEmailOpen] = useState(false);
     const [testEmailAddress, setTestEmailAddress] = useState('');
     const [testEmailSubject, setTestEmailSubject] = useState('This is a test email');
@@ -147,11 +134,19 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
                     body: JSON.stringify({ siteId: selectedProject.siteId }),
                 });
                 const data = await response.json();
-                if (data.status === 'running') {
-                    // ★★★ UPDATE: Use the global state handler ★★★
+
+                // ★★★ UPDATE: Handle the new "stuck" status ★★★
+                if (data.status === 'stuck') {
+                    onDeleteJobStateChange({ isDeleteJobRunning: false }); // Stop polling
+                    toast({ 
+                        title: "Deletion Job Stuck", 
+                        description: data.error || "The job has stopped due to an API error.", 
+                        variant: "destructive",
+                        duration: 10000
+                    });
+                } else if (data.status === 'running') {
                     onDeleteJobStateChange({ deleteProgress: { processed: data.processed, total: data.total } });
                 } else if (data.status === 'complete' || data.status === 'idle') {
-                     // ★★★ UPDATE: Use the global state handler ★★★
                     onDeleteJobStateChange({ 
                         isDeleteJobRunning: false, 
                         deleteProgress: { processed: data.total, total: data.total } 
@@ -160,6 +155,7 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
                 }
             } catch (error) {
                 console.error("Failed to fetch delete job status:", error);
+                onDeleteJobStateChange({ isDeleteJobRunning: false }); // Stop polling on error
             }
         }, 2000);
 
@@ -493,7 +489,6 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
             toast({ title: "Deletion Job Started", description: data.message });
             setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
             setSelectedAllMembers([]);
-            // ★★★ UPDATE: Use the global state handler ★★★
             onDeleteJobStateChange({ isDeleteJobRunning: true });
         } catch (error: any) {
             toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
@@ -562,7 +557,6 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
             return;
         }
         
-        // Use the first available campaign ID for the test
         const campaignId = Object.values(selectedProject.campaigns)[0];
 
         setIsSendingTest(true);
@@ -648,7 +642,6 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
                         </div>
                     </div>
                     
-                    {/* ★★★ UPDATE: Use the global state for the progress bar ★★★ */}
                     {isDeleteJobRunning && (
                         <Card className="bg-gradient-card shadow-card border-primary/10">
                             <CardHeader>
@@ -840,7 +833,6 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
                                 <DialogFooter>
                                     <AlertDialog>
                                         <AlertDialogTrigger asChild>
-                                            {/* ★★★ UPDATE: Use the local submitting state for the button disable ★★★ */}
                                             <Button variant="destructive" disabled={isSubmittingDelete}>
                                                 <Trash2 className="mr-2 h-4 w-4" />
                                                 {isSubmittingDelete ? 'Starting...' : `Delete (${selectedAllMembers.length}) Selected`}
