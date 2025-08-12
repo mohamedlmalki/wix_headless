@@ -7,14 +7,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Server, PlayCircle, CheckCircle, XCircle, FileJson, Trash2, Search, RefreshCw, Save, PlusCircle, BarChart2, Users, MailCheck, MailX, MousePointerClick, Pencil, Download, ListChecks, Link, Link2, AlertCircle, MailMinus, Send, PauseCircle, StopCircle, Clock } from "lucide-react";
+import { Server, PlayCircle, CheckCircle, XCircle, FileJson, Trash2, Search, RefreshCw, Save, PlusCircle, Pencil, Download, ListChecks, Link, Link2, Send, PauseCircle, StopCircle, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import Navbar from '@/components/Navbar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from '@/components/ui/progress';
-// --- KEY CHANGE: Import the singleton instance, not the class ---
 import { jobManager, JobState, UpdatePayload } from '../lib/JobManager';
 
 const exportEmailsToTxt = (data: any[], filename: string) => {
@@ -39,15 +38,6 @@ interface Campaign { [key: string]: string; }
 interface HeadlessProject { projectName: string; siteId: string; apiKey: string; campaigns?: Campaign; }
 interface Member { id: string; loginEmail: string; contactId: string; profile: { nickname: string; }; status?: string; }
 interface SenderDetails { fromName: string; fromEmail: string; }
-interface CampaignStatistics {
-    delivered: CampaignRecipient[];
-    opened: CampaignRecipient[];
-    clicked: CampaignRecipient[];
-    bounced: CampaignRecipient[];
-    notSent: CampaignRecipient[];
-    complained: number;
-}
-interface CampaignRecipient { contactId: string; lastActivityDate: string; emailAddress?: string; fullName?: string; }
 type CampaignField = { id: number; key: string; value: string; };
 
 const initialJobState: JobState = {
@@ -63,7 +53,6 @@ const initialJobState: JobState = {
     processedEmails: 0,
     jobCancelled: false,
 };
-
 
 export function HeadlessImportPage() {
    
@@ -92,11 +81,6 @@ export function HeadlessImportPage() {
   const [apiKey, setApiKey] = useState("");
   const [originalSiteId, setOriginalSiteId] = useState("");
   const [campaignFields, setCampaignFields] = useState<CampaignField[]>([{ id: 1, key: '', value: '' }]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('');
-  const [statistics, setStatistics] = useState<CampaignStatistics | null>(null);
-  const [isFetchingStats, setIsFetchingStats] = useState(false);
-  const [isFetchingRecipients, setIsFetchingRecipients] = useState(false);
-  const [recipientDialogData, setRecipientDialogData] = useState<{title: string, recipients: CampaignRecipient[]}>({title: '', recipients: []});
   const [isAllMembersDialogOpen, setAllMembersDialogOpen] = useState(false);
   const [allMembers, setAllMembers] = useState<Member[]>([]);
   const [isFetchingAllMembers, setIsFetchingAllMembers] = useState(false);
@@ -122,30 +106,25 @@ export function HeadlessImportPage() {
   const [testEmailResponse, setTestEmailResponse] = useState('');
 
   useEffect(() => {
-  const fetchProjects = async () => {
-    try {
-      const response = await fetch('/api/headless-get-config');
-      if (response.ok) {
-        const projects = await response.json();
-        setHeadlessProjects(projects);
-        // Automatically select the first project if the list is not empty
-        if (projects.length > 0 && !selectedProject) {
-          setSelectedProject(projects[0]);
+    const fetchProjects = async () => {
+      try {
+        const response = await fetch('/api/headless-get-config');
+        if (response.ok) {
+          const projects = await response.json();
+          setHeadlessProjects(projects);
+          if (projects.length > 0 && !selectedProject) {
+            setSelectedProject(projects[0]);
+          }
         }
+      } catch (error) {
+        console.error("Failed to fetch projects:", error);
+        toast({ title: "Error", description: "Could not load projects.", variant: "destructive" });
       }
-    } catch (error) {
-      console.error("Failed to fetch projects:", error);
-      toast({ title: "Error", description: "Could not load projects.", variant: "destructive" });
-    }
-  };
-  fetchProjects();
-}, [selectedProject]); // Re-run if selectedProject changes, to ensure consistency
+    };
+    fetchProjects();
+  }, [selectedProject, toast]);
 
-  //--------------------------------
-
-  // --- KEY CHANGE: Subscribe to the JobManager when the component loads ---
   useEffect(() => {
-    // This is the callback function the manager will use to send updates
     const handleJobUpdate = (data: UpdatePayload) => {
       setJobs(prev => ({
           ...prev,
@@ -156,18 +135,15 @@ export function HeadlessImportPage() {
       }));
     };
     
-    // Get the initial state of any jobs that might already be running
     const initialState = jobManager.getJobsState();
     setJobs(initialState);
     
-    // Subscribe to future updates
     jobManager.subscribe(handleJobUpdate);
     
-    // On cleanup, unsubscribe to prevent memory leaks
     return () => {
       jobManager.unsubscribe();
     };
-  }, []); // Empty dependency array means this runs only once on mount
+  }, []);
 
   useEffect(() => {
     if (!isDeleteJobRunning || !selectedProject) return;
@@ -190,13 +166,11 @@ export function HeadlessImportPage() {
       } catch (error) {
         console.error("Failed to fetch delete job status:", error);
       }
-    }, 2000); // Poll every 2 seconds
+    }, 2000);
 
     return () => clearInterval(intervalId);
-  }, [isDeleteJobRunning, selectedProject]);
+  }, [isDeleteJobRunning, selectedProject, toast]);
 
-
-//---------------------------------
   const currentJob = selectedProject ? jobs[selectedProject.siteId] : undefined;
 
   const filteredSearchResults = searchResults.filter(member =>
@@ -356,8 +330,6 @@ export function HeadlessImportPage() {
     }
   };
   
-  //----------------------------
-  
   const handleDeleteProject = async () => {
     if (!selectedProject) {
       toast({ title: "No Project Selected", description: "Please select a project to delete.", variant: "destructive" });
@@ -365,10 +337,8 @@ export function HeadlessImportPage() {
     }
 
     try {
-      // Create a new list of projects that excludes the selected one
       const updatedConfig = headlessProjects.filter(p => p.siteId !== selectedProject.siteId);
 
-      // Send the new, shorter list to the backend to be saved
       const updateResponse = await fetch('/api/headless-update-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -380,19 +350,13 @@ export function HeadlessImportPage() {
       }
 
       toast({ title: "Success", description: `Project "${selectedProject.projectName}" has been deleted.` });
-
-      // Update the local state to immediately remove the project from the dropdown
       setHeadlessProjects(updatedConfig);
-      
-      // If there are other projects left, select the first one. Otherwise, clear the selection.
       setSelectedProject(updatedConfig.length > 0 ? updatedConfig[0] : undefined);
 
     } catch (error) {
       toast({ title: "Error Deleting Project", description: (error as Error).message, variant: "destructive" });
     }
   };
-  
-  //----------------------------
   
   const handleCampaignFieldChange = (id: number, field: 'key' | 'value', value: string) => {
     setCampaignFields(prevFields => 
@@ -411,64 +375,10 @@ export function HeadlessImportPage() {
         setCampaignFields([{ id: 1, key: '', value: '' }]);
     }
   };
-
-  const fetchRecipientsForActivity = async (activity: string, campaignId: string, siteId: string): Promise<CampaignRecipient[]> => {
-    const response = await fetch('/api/headless-get-recipients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId, campaignId, activity }),
-    });
-    if (!response.ok) throw new Error(`Failed to fetch ${activity.toLowerCase()} recipients.`);
-    const data = await response.json();
-    return (data.recipients || []).filter((r: CampaignRecipient) => r.emailAddress);
-  };
-
-  const handleFetchStats = async (campaignId: string) => {
-    if (!campaignId || !selectedProject) {
-      setStatistics(null);
-      return;
-    }
-    setIsFetchingStats(true);
-    setStatistics(null);
-    try {
-        const summaryResponse = await fetch('/api/headless-get-stats', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ siteId: selectedProject.siteId, campaignIds: [campaignId] }),
-        });
-        if (!summaryResponse.ok) throw new Error('Failed to fetch campaign summary.');
-        const summaryData = await summaryResponse.json();
-        const summaryEmailStats = summaryData.statistics && summaryData.statistics.length > 0 ? summaryData.statistics[0].email : null;
-
-        const [delivered, opened, clicked, bounced, notSent] = await Promise.all([
-            fetchRecipientsForActivity('DELIVERED', campaignId, selectedProject.siteId),
-            fetchRecipientsForActivity('OPENED', campaignId, selectedProject.siteId),
-            fetchRecipientsForActivity('CLICKED', campaignId, selectedProject.siteId),
-            fetchRecipientsForActivity('BOUNCED', campaignId, selectedProject.siteId),
-            fetchRecipientsForActivity('NOT_SENT', campaignId, selectedProject.siteId),
-        ]);
-        
-        setStatistics({ 
-            delivered, 
-            opened, 
-            clicked, 
-            bounced, 
-            notSent, 
-            complained: summaryEmailStats ? summaryEmailStats.complained : 0,
-        });
-
-    } catch (error) {
-        toast({ title: "Error Fetching Stats", description: (error as Error).message, variant: "destructive" });
-    } finally {
-        setIsFetchingStats(false);
-    }
-  };
   
   useEffect(() => {
     if (selectedProject) {
         fetchSenderDetails(selectedProject.siteId);
-        setSelectedCampaignId('');
-        setStatistics(null);
     }
   }, [selectedProject]);
   
@@ -657,14 +567,18 @@ export function HeadlessImportPage() {
   };
   
   const handleSendTestEmail = async () => {
-    if (!selectedCampaignId) {
-        toast({ title: "No Campaign Selected", description: "Please select a campaign from the statistics section first.", variant: "destructive" });
-        return;
+    if (!selectedProject?.campaigns || Object.keys(selectedProject.campaigns).length === 0) {
+      toast({ title: "No Campaign Configured", description: "Please edit the project and add a campaign ID.", variant: "destructive" });
+      return;
     }
     if (!testEmailAddress) {
-        toast({ title: "Recipient Email Required", description: "Please enter an email address to send the test to.", variant: "destructive" });
-        return;
+      toast({ title: "Recipient Email Required", description: "Please enter an email address to send the test to.", variant: "destructive" });
+      return;
     }
+    
+    // Use the first available campaign ID for the test
+    const campaignId = Object.values(selectedProject.campaigns)[0];
+
     setIsSendingTest(true);
     setTestEmailResponse('');
     try {
@@ -673,7 +587,7 @@ export function HeadlessImportPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 siteId: selectedProject?.siteId, 
-                campaignId: selectedCampaignId,
+                campaignId: campaignId,
                 emailSubject: testEmailSubject,
                 toEmailAddress: testEmailAddress,
             }),
@@ -693,7 +607,6 @@ export function HeadlessImportPage() {
   };
   
   const emailCount = currentJob?.emails.split(/[,\s\n]+/).filter(e => e.trim().includes('@')).length || 0;
-  const availableCampaigns = selectedProject?.campaigns ? Object.entries(selectedProject.campaigns) : [];
 
   return (
     <div className="min-h-screen bg-gradient-subtle">
@@ -720,7 +633,7 @@ export function HeadlessImportPage() {
                             </DialogHeader>
                             <div className="space-y-4">
                                 <Input placeholder="Recipient Email" value={testEmailAddress} onChange={(e) => setTestEmailAddress(e.target.value)} />
-                                <Button onClick={handleSendTestEmail} disabled={isSendingTest || !selectedCampaignId}>
+                                <Button onClick={handleSendTestEmail} disabled={isSendingTest}>
                                     {isSendingTest ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                                     Send Test
                                 </Button>
@@ -758,7 +671,7 @@ export function HeadlessImportPage() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <Progress value={(deleteProgress.processed / deleteProgress.total) * 100} />
+                        <Progress value={(deleteProgress.processed / (deleteProgress.total || 1)) * 100} />
                     </CardContent>
                 </Card>
             )}
@@ -795,7 +708,6 @@ export function HeadlessImportPage() {
                         <div className="flex gap-2">
                             <Button variant="outline" size="sm" onClick={() => handleOpenDialog('add')}><PlusCircle className="mr-2 h-4 w-4" /> Add</Button>
                             <Button variant="outline" size="sm" onClick={() => handleOpenDialog('edit')} disabled={!selectedProject}><Pencil className="mr-2 h-4 w-4" /> Edit</Button>
-                            {/* START: Add this new block of code */}
                             <AlertDialog>
                                 <AlertDialogTrigger asChild>
                                     <Button variant="destructive" size="sm" disabled={!selectedProject}><Trash2 className="mr-2 h-4 w-4" /> Delete</Button>
@@ -810,7 +722,6 @@ export function HeadlessImportPage() {
                                     <AlertDialogFooter>
                                         <AlertDialogCancel>Cancel</AlertDialogCancel>
                                         <AlertDialogAction onClick={() => {
-                                            // We will create this function in the next step
                                             handleDeleteProject();
                                         }}>
                                             Continue
@@ -818,7 +729,6 @@ export function HeadlessImportPage() {
                                     </AlertDialogFooter>
                                 </AlertDialogContent>
                             </AlertDialog>
-                            {/* END: Add this new block of code */}
                         </div>
                     </CardHeader>
                     <CardContent>
@@ -964,48 +874,6 @@ export function HeadlessImportPage() {
                 </DialogContent>
             </Dialog>
 
-            <Card className="bg-gradient-card shadow-card border-primary/10">
-                <CardHeader className="flex flex-row items-center justify-between">
-                    <div>
-                        <CardTitle className="flex items-center gap-2"><BarChart2 className="h-5 w-5" />Campaign Statistics</CardTitle>
-                        <CardDescription>Select a campaign to view its performance metrics.</CardDescription>
-                    </div>
-                    <Button variant="outline" size="icon" onClick={() => handleFetchStats(selectedCampaignId)} disabled={!selectedCampaignId || isFetchingStats}>
-                        <RefreshCw className={`h-4 w-4 ${isFetchingStats ? 'animate-spin' : ''}`} />
-                    </Button>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <Select value={selectedCampaignId} onValueChange={(value) => { setSelectedCampaignId(value); handleFetchStats(value); }} disabled={availableCampaigns.length === 0}><SelectTrigger><SelectValue placeholder="Select a campaign..." /></SelectTrigger>
-                        <SelectContent>{availableCampaigns.length > 0 ? (availableCampaigns.map(([name, id]) => (<SelectItem key={id} value={id}>{name}</SelectItem>))) : (<SelectItem value="disabled" disabled>No campaigns configured for this project.</SelectItem>)}</SelectContent>
-                    </Select>
-                    {isFetchingStats && <div className="text-center py-4"><RefreshCw className="h-6 w-6 animate-spin mx-auto text-muted-foreground" /></div>}
-                    {statistics && (
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 pt-4">
-                            <StatCard icon={MailCheck} title="Delivered" recipients={statistics.delivered} activity="DELIVERED" onRecipientClick={setRecipientDialogData} />
-                            <StatCard icon={Users} title="Opened" recipients={statistics.opened} activity="OPENED" onRecipientClick={setRecipientDialogData} />
-                            <StatCard icon={MousePointerClick} title="Clicked" recipients={statistics.clicked} activity="CLICKED" onRecipientClick={setRecipientDialogData} />
-                            <StatCard icon={MailX} title="Bounced" recipients={statistics.bounced} activity="BOUNCED" onRecipientClick={setRecipientDialogData} />
-                            <StatCard icon={AlertCircle} title="Complained" count={statistics.complained} />
-                            <StatCard icon={MailMinus} title="Not Sent" recipients={statistics.notSent} activity="NOT_SENT" onRecipientClick={setRecipientDialogData} />
-                        </div>
-                    )}
-                </CardContent>
-                <Dialog><DialogTrigger asChild><Button id="recipient-dialog-trigger" className="hidden">Open</Button></DialogTrigger>
-                    <DialogContent className="max-w-2xl">
-                        <DialogHeader className="flex-row justify-between items-center">
-                            <div>
-                                <DialogTitle>Recipients: {recipientDialogData.title}</DialogTitle>
-                                <DialogDescription>List of contacts for the selected activity.</DialogDescription>
-                            </div>
-                            <Button variant="outline" size="sm" onClick={() => exportEmailsToTxt(recipientDialogData.recipients, `recipients-${recipientDialogData.title}-emails`)}><Download className="mr-2 h-4 w-4"/>Export Emails</Button>
-                        </DialogHeader>
-                        <div className="max-h-[60vh] overflow-y-auto">{recipientDialogData.recipients.length > 0 ? (<Table><TableHeader><TableRow><TableHead>Email</TableHead><TableHead>Full Name</TableHead><TableHead>Last Activity</TableHead></TableRow></TableHeader>
-                            <TableBody>{recipientDialogData.recipients.map(r => (<TableRow key={r.contactId}><TableCell>{r.emailAddress || 'N/A'}</TableCell><TableCell>{r.fullName || 'N/A'}</TableCell><TableCell>{new Date(r.lastActivityDate).toLocaleString()}</TableCell></TableRow>))}</TableBody>
-                        </Table>) : <p className="text-center py-4 text-muted-foreground">No recipients found for this activity.</p>}</div>
-                    </DialogContent>
-                </Dialog>
-            </Card>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <Card className="bg-gradient-card shadow-card border-primary/10">
                     <CardHeader><div className="flex justify-between items-center"><div><CardTitle>Bulk User Import</CardTitle><CardDescription>Enter one email per line or separate with commas/spaces.</CardDescription></div><Badge variant="secondary">{emailCount} email(s)</Badge></div></CardHeader>
@@ -1110,44 +978,4 @@ export function HeadlessImportPage() {
       </div>
     </div>
   );
-}
-
-interface StatCardProps {
-    icon: React.ElementType;
-    title: string;
-    recipients?: CampaignRecipient[];
-    count?: number;
-    activity?: string;
-    onRecipientClick?: (data: {title: string, recipients: CampaignRecipient[]}) => void;
-}
-
-function StatCard({ icon: Icon, title, recipients, count, activity, onRecipientClick }: StatCardProps) {
-    const value = typeof count === 'number' ? count : recipients?.length ?? 0;
-    const canViewRecipients = onRecipientClick && recipients && activity;
-
-    return (
-        <Card className="p-4">
-            <CardHeader className="p-0 flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">{title}</CardTitle>
-                <Icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent className="p-0">
-                <div className="text-2xl font-bold">{value}</div>
-                {canViewRecipients ? (
-                    <Button 
-                        variant="link" 
-                        className="p-0 h-auto text-xs text-muted-foreground" 
-                        onClick={() => { 
-                            onRecipientClick({ title: activity, recipients: recipients }); 
-                            document.getElementById('recipient-dialog-trigger')?.click(); 
-                        }}
-                    >
-                        View Recipients
-                    </Button>
-                ) : (
-                    <div className="h-6 text-xs text-muted-foreground/50">—</div>
-                )}
-            </CardContent>
-        </Card>
-    )
 }
