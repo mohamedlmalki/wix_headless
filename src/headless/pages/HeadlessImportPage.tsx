@@ -448,47 +448,53 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
         }
     };
 
-// Find this function in your HeadlessImportPage.tsx file
 const handleDeleteAllSelected = async () => {
-    if (selectedAllMembers.length === 0 || !selectedProject) {
-        toast({ title: "No members selected", variant: "destructive" });
-        return;
-    }
-    setIsSubmittingDelete(true);
-    try {
-        // ★★★ REMOVE THE CALL TO THE RESET API ★★★
-        // await fetch('/api/headless-reset-job', { ... }); // This line should be deleted.
+        if (selectedAllMembers.length === 0 || !selectedProject) {
+            toast({ title: "No members selected", variant: "destructive" });
+            return;
+        }
+        setIsSubmittingDelete(true);
+        try {
+            const membersToDelete = allMembers
+                .filter(member => selectedAllMembers.includes(member.id))
+                .map(member => ({ memberId: member.id, contactId: member.contactId }));
 
-        // Immediately reset the frontend state.
-        onDeleteJobStateChange({
-            isDeleteJobRunning: false,
-            deleteProgress: { processed: 0, total: 0 },
-        });
+            // Start the job and wait for the initial state response
+            const response = await fetch('/api/headless-start-delete-job', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ siteId: selectedProject?.siteId, membersToDelete }),
+            });
 
-        const membersToDelete = allMembers
-            .filter(member => selectedAllMembers.includes(member.id))
-            .map(member => ({ memberId: member.id, contactId: member.contactId }));
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Failed to start deletion job.');
 
-        const response = await fetch('/api/headless-start-delete-job', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ siteId: selectedProject?.siteId, membersToDelete }),
-        });
+            toast({ title: "Deletion Job Started", description: data.message });
 
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.message || 'Failed to start deletion job.');
+            // ★★★ THE FINAL FIX ★★★
+            // Use the initial state from the backend's response to set the progress bar correctly
+            if (data.initialState) {
+                 onDeleteJobStateChange({
+                    isDeleteJobRunning: true,
+                    deleteProgress: { 
+                        processed: data.initialState.processed, 
+                        total: data.initialState.total 
+                    },
+                });
+            } else {
+                 onDeleteJobStateChange({ isDeleteJobRunning: true });
+            }
 
-        toast({ title: "Deletion Job Started", description: data.message });
-        setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
-        setSelectedAllMembers([]);
-        onDeleteJobStateChange({ isDeleteJobRunning: true });
+            // Update the UI immediately
+            setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
+            setSelectedAllMembers([]);
 
-    } catch (error: any) {
-        toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
-    } finally {
-        setIsSubmittingDelete(false);
-    }
-};
+        } catch (error: any) {
+            toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
+        } finally {
+            setIsSubmittingDelete(false);
+        }
+    };
 
 
 //--------------------------
