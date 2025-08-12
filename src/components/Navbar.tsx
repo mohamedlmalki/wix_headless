@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Server } from "lucide-react"; // <-- Import the 'Server' icon
+import { Server, BarChart2 } from "lucide-react"; // <-- Import the 'BarChart2' icon
 
 const Navbar = () => {
   const location = useLocation();
@@ -23,6 +23,17 @@ const Navbar = () => {
             >
               <Server size={16} />
               Headless Import
+            </Button>
+          </Link>
+          {/* This is the new link for the Campaign Stats page */}
+          <Link to="/campaign-stats">
+            <Button 
+              variant={isActive("/campaign-stats") ? "default" : "ghost"} 
+              size="sm"
+              className="gap-2"
+            >
+              <BarChart2 size={16} />
+              Campaign Stats
             </Button>
           </Link>
         </div>
