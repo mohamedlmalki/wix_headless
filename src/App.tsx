@@ -8,12 +8,12 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { HeadlessImportPage } from './headless/pages/HeadlessImportPage';
-import CampaignStatsPage from './headless/pages/CampaignStatsPage'; 
+import CampaignStatsPage from './headless/pages/CampaignStatsPage';
 import { jobManager, JobState, UpdatePayload } from './headless/lib/JobManager';
 
 const queryClient = new QueryClient();
 
-// Define a simple initial state for jobs
+// A default empty state for a job
 const initialJobState: JobState = {
     siteId: '',
     emails: '',
@@ -29,10 +29,10 @@ const initialJobState: JobState = {
 };
 
 const App = () => {
-  // ★★★ NEW: The state for all jobs now lives here in the main App component ★★★
+  // ★★★ The state for all jobs now lives here in the main App component ★★★
   const [jobs, setJobs] = useState<Record<string, JobState>>({});
 
-  // ★★★ NEW: This effect subscribes to the job manager and keeps the state updated ★★★
+  // This effect subscribes to the job manager and keeps the state updated globally
   useEffect(() => {
     const handleJobUpdate = (data: UpdatePayload) => {
       setJobs(prev => ({
@@ -44,16 +44,20 @@ const App = () => {
       }));
     };
     
+    // Load the initial state from the manager when the app starts
     const initialState = jobManager.getJobsState();
     setJobs(initialState);
+    
+    // Subscribe to future updates
     jobManager.subscribe(handleJobUpdate);
     
+    // Unsubscribe when the app closes
     return () => {
       jobManager.unsubscribe();
     };
   }, []);
 
-  // ★★★ NEW: This function is passed down to the pages to allow them to update the job state ★★★
+  // This function is passed down to the pages to let them update the job state
   const handleJobStateChange = (siteId: string, updates: Partial<JobState>) => {
     setJobs(prev => ({
         ...prev,
@@ -72,10 +76,10 @@ const App = () => {
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
-            {/* ★★★ UPDATE: Pass the jobs state and handler down to the HeadlessImportPage ★★★ */}
-            <Route 
-              path="/headless-import" 
-              element={<HeadlessImportPage jobs={jobs} onJobStateChange={handleJobStateChange} />} 
+            {/* ★★★ We pass the jobs state and handler down to the HeadlessImportPage ★★★ */}
+            <Route
+              path="/headless-import"
+              element={<HeadlessImportPage jobs={jobs} onJobStateChange={handleJobStateChange} />}
             />
             <Route path="/campaign-stats" element={<CampaignStatsPage />} />
             <Route path="*" element={<NotFound />} />
