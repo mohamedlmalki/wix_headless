@@ -8,15 +8,6 @@ export async function onRequestPost(context) {
         const { siteId, membersToDelete } = await request.json();
         const jobKey = `delete_job_${siteId}`;
 
-        // First, check if a job is already running to prevent conflicts
-        const existingJobJson = await env.WIX_HEADLESS_CONFIG.get(jobKey);
-        if (existingJobJson) {
-            const existingJob = JSON.parse(existingJobJson);
-            if (existingJob.status === 'running') {
-                return new Response(JSON.stringify({ message: "A deletion job is already in progress for this site." }), { status: 409 });
-            }
-        }
-
         // Get the project config to find the API key
         const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
         if (!projectsJson) throw new Error("Could not retrieve project configurations.");
@@ -26,7 +17,9 @@ export async function onRequestPost(context) {
         }
         
         // ★★★ THE CRUCIAL FIX ★★★
-        // Create the initial job state object that we will both save and return.
+        // Before doing anything else, completely delete any old job status from the database.
+        await env.WIX_HEADLESS_CONFIG.delete(jobKey);
+
         const initialJobState = {
             status: 'running',
             processed: 0,
@@ -34,14 +27,13 @@ export async function onRequestPost(context) {
             error: null
         };
 
-        // Immediately write this initial "zeroed-out" state to the database.
+        // Now, immediately write the new "zeroed-out" state to the database.
         await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(initialJobState));
 
         // Define the background task
         const doDeletion = async () => {
             let processedCount = 0;
             for (const member of membersToDelete) {
-                // ... (deletion logic remains the same)
                 const deleteMemberResponse = await fetch(`https://www.wixapis.com/members/v1/members/${member.memberId}`, {
                     method: 'DELETE',
                     headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
@@ -61,7 +53,7 @@ export async function onRequestPost(context) {
                 
                 processedCount++;
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ ...initialJobState, processed: processedCount }));
-                await delay(250); // A small delay to be polite to the Wix API
+                await delay(250);
             }
             
             await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ ...initialJobState, status: 'complete', processed: processedCount }));
@@ -69,7 +61,6 @@ export async function onRequestPost(context) {
 
         context.waitUntil(doDeletion());
 
-        // Return the initial state immediately to the frontend.
         return new Response(JSON.stringify({ success: true, message: "Deletion job started.", initialState: initialJobState }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
