@@ -25,7 +25,7 @@ export async function onRequestPost(context) {
     const jobKey = `delete_job_${siteId}`;
 
     try {
-        // ★★★ THE TYPO WAS HERE - Corrected to WIX_HEADLESS_CONFIG ★★★
+        // ★★★ THE TYPO IS FIXED HERE ★★★
         const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
         if (!projectsJson) throw new Error("Could not retrieve project configurations.");
         
