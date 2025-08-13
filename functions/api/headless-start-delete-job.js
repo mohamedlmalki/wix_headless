@@ -15,7 +15,6 @@ async function getErrorDetails(response) {
         const parsed = await response.json();
         return parsed.message || JSON.stringify(parsed);
     } catch (e) {
-        // If parsing fails, return the raw text
         return await response.text();
     }
 }
@@ -33,7 +32,7 @@ export async function onRequestPost(context) {
         if (!project) return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
 
         const doBulkDeletion = async () => {
-            const memberChunks = chunkArray(membersToDelete, 100);
+            const memberChunks = chunkArray(membersToDelete, 100); // Main batches of 100
             const totalSteps = memberChunks.length * 2;
             let stepsCompleted = 0;
 
@@ -41,43 +40,43 @@ export async function onRequestPost(context) {
                 const chunk = memberChunks[i];
                 const currentChunkNumber = i + 1;
 
-                // --- STEP 1: Bulk Delete a batch of 100 Members ---
+                // --- STEP 1: Bulk Delete Members ---
                 stepsCompleted++;
-                let currentState = { status: 'running', processed: stepsCompleted, total: totalSteps, step: `Deleting member batch ${currentChunkNumber} of ${memberChunks.length}...` };
+                let currentState = { status: 'running', processed: stepsCompleted, total: totalSteps, step: `Step ${stepsCompleted}/${totalSteps}: Deleting member batch ${currentChunkNumber} of ${memberChunks.length}...` };
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
 
                 const memberIdsInChunk = chunk.map(m => m.memberId).filter(Boolean);
 
                 if (memberIdsInChunk.length > 0) {
-                    const memberDeleteRes = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
+                    await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
                         method: 'POST',
                         headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
                         body: JSON.stringify({ "memberIds": memberIdsInChunk })
-                    });
-                    if (!memberDeleteRes.ok) {
-                        const errorDetails = await getErrorDetails(memberDeleteRes);
-                        console.error(`Failed on member batch. Status: ${memberDeleteRes.status}: ${errorDetails}`);
-                        // Optional: you could decide to stop the job here if a batch fails
-                    }
+                    }).catch(e => console.error('Member bulk delete failed:', e.message));
                 }
                 
-                await delay(1000); // Wait 1 second
+                await delay(1000); // Wait 1 second as per requirement
 
-                // --- STEP 2: Delete corresponding Contacts individually in parallel ---
+                // --- STEP 2: Delete Contacts in smaller parallel sub-batches ---
                 stepsCompleted++;
-                currentState = { status: 'running', processed: stepsCompleted, total: totalSteps, step: `Deleting contact batch ${currentChunkNumber} of ${memberChunks.length}...` };
+                currentState = { status: 'running', processed: stepsCompleted, total: totalSteps, step: `Step ${stepsCompleted}/${totalSteps}: Deleting contact batch ${currentChunkNumber} of ${memberChunks.length}...` };
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
                 
                 const contactIdsInChunk = chunk.map(m => m.contactId).filter(Boolean);
-                if (contactIdsInChunk.length > 0) {
-                    const contactDeletePromises = contactIdsInChunk.map(contactId => {
-                         const contactApiUrl = `https://www.wixapis.com/contacts/v4/contacts/${contactId}`;
-                         return fetch(contactApiUrl, {
-                             method: 'DELETE',
-                             headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
-                         });
-                    });
-                    await Promise.allSettled(contactDeletePromises);
+                
+                // Process contacts in smaller parallel chunks (e.g., 10 at a time) to avoid server limits
+                const smallerContactChunks = chunkArray(contactIdsInChunk, 10); 
+                for (const contactChunk of smallerContactChunks) {
+                     if (contactChunk.length > 0) {
+                        const contactDeletePromises = contactChunk.map(contactId => {
+                             const contactApiUrl = `https://www.wixapis.com/contacts/v4/contacts/${contactId}`;
+                             return fetch(contactApiUrl, {
+                                 method: 'DELETE',
+                                 headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
+                             });
+                        });
+                        await Promise.allSettled(contactDeletePromises);
+                     }
                 }
             }
 
