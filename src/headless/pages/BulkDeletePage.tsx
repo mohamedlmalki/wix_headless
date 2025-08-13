@@ -1,3 +1,5 @@
+// src/headless/pages/BulkDeletePage.tsx
+
 import { useState, useEffect, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
@@ -138,7 +140,7 @@ const BulkDeletePage = () => {
                         isDeleteJobRunning: false,
                         deleteProgress: { processed: data.total, total: data.total, progress: 100, step: 'Complete!' }
                     });
-                    toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
+                    toast({ title: "Bulk delete complete!", description: `Successfully removed members.` });
                     stopPolling();
                     handleListAllMembers();
                 } else if (data.status === 'idle') {
@@ -228,9 +230,11 @@ const BulkDeletePage = () => {
                     contactId: member.contactId,
                 }));
             
+            // Simplified total for member-only deletion
+            const totalSteps = Math.ceil(membersToDelete.length / 100);
             setDeleteJobState({
                 isDeleteJobRunning: true,
-                deleteProgress: { processed: 0, total: membersToDelete.length * 2, step: 'Initializing job...', progress: 0 },
+                deleteProgress: { processed: 0, total: totalSteps, step: 'Initializing job...', progress: 0 },
             });
             
             const response = await fetch('/api/headless-start-delete-job', {
@@ -371,12 +375,10 @@ const BulkDeletePage = () => {
                                 />
                             </CardContent>
                             <CardFooter>
-                                {deleteJobState.isDeleteJobRunning && (
-                                    <Button variant="outline" onClick={handleResetJob}>
-                                        <RefreshCw className="mr-2 h-4 w-4" />
-                                        Reset/Unlock Job
-                                    </Button>
-                                )}
+                                <Button variant="outline" onClick={handleResetJob}>
+                                    <RefreshCw className="mr-2 h-4 w-4" />
+                                    Reset/Unlock Job
+                                </Button>
                             </CardFooter>
                         </Card>
                     )}
@@ -446,7 +448,7 @@ const BulkDeletePage = () => {
                                         <AlertDialogContent>
                                             <AlertDialogHeader>
                                                 <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                                <AlertDialogDescription>This will start a background job to permanently delete the selected {selectedAllMembers.length} member(s) and their associated contacts. This action cannot be undone.</AlertDialogDescription>
+                                                <AlertDialogDescription>This will start a background job to permanently delete the selected {selectedAllMembers.length} members. This action cannot be undone.</AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
                                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
