@@ -16,31 +16,36 @@ export async function onRequestPost(context) {
         await env.WIX_HEADLESS_CONFIG.delete(controlKey);
 
         try {
-            while (jobState.processed < jobState.total) {
-                const command = await env.WIX_HEADLESS_CONFIG.get(controlKey);
+            for (let i = 0; i < emails.length; i++) {
+                // --- STATE MACHINE LOGIC ---
+                while (true) {
+                    const command = await env.WIX_HEADLESS_CONFIG.get(controlKey);
 
-                if (command === 'pause') {
-                    jobState.status = 'paused';
-                    await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
-                    await env.WIX_HEADLESS_CONFIG.delete(controlKey);
-                    await delay(2500);
-                    continue;
+                    if (command === 'pause') {
+                        jobState.status = 'paused';
+                        await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
+                        await env.WIX_HEADLESS_CONFIG.delete(controlKey); // Consume the 'pause' command
+                    } else if (command === 'resume') {
+                        jobState.status = 'running';
+                        await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
+                        await env.WIX_HEADLESS_CONFIG.delete(controlKey);
+                        break; // Exit the pause loop
+                    } else if (command === 'cancel') {
+                        jobState.status = 'canceled';
+                        await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
+                        await env.WIX_HEADLESS_CONFIG.delete(controlKey);
+                        return; // Exit the job entirely
+                    }
+
+                    if (jobState.status === 'paused') {
+                        await delay(2500); // Wait while paused
+                    } else {
+                        break; // Not paused, so continue processing
+                    }
                 }
+                // --- END OF STATE MACHINE ---
 
-                if (command === 'cancel') {
-                    jobState.status = 'canceled';
-                    await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
-                    await env.WIX_HEADLESS_CONFIG.delete(controlKey);
-                    return;
-                }
-                
-                if (jobState.status === 'paused') {
-                    await delay(2500);
-                    continue;
-                }
-
-
-                const email = emails[jobState.processed];
+                const email = emails[i];
                 const payload = {
                     string_field: subject, uuid_field: crypto.randomUUID(), number_field: 42,
                     dateTime_field: new Date().toISOString(), date_field: new Date().toISOString().split('T')[0],
@@ -49,6 +54,7 @@ export async function onRequestPost(context) {
                     array_field: ["item_1", "item_2"]
                 };
 
+                // Perform the actual webhook request within its own error handler
                 try {
                     const wixResponse = await fetch(webhookUrl, {
                         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -62,16 +68,22 @@ export async function onRequestPost(context) {
                 } catch (error) {
                     jobState.results.push({ email, status: 'Failed', reason: error.message });
                 }
-                
-                jobState.processed++;
+
+                // Update progress and save state
+                jobState.processed = i + 1;
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
-                await delay(1000);
+                await delay(1000); // The delay between each webhook send
             }
 
-            jobState.status = 'complete';
-            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
+            // After the loop, do a final status update
+            const finalJobState = JSON.parse(await env.WIX_HEADLESS_CONFIG.get(jobKey));
+            if (finalJobState.status !== 'canceled') {
+                finalJobState.status = 'complete';
+                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(finalJobState));
+            }
 
         } catch (error) {
+            // If the whole process fails for an unexpected reason, mark the job as 'stuck'
             const errorState = { ...jobState, status: 'stuck', error: error.message };
             await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(errorState));
         }

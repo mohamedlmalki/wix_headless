@@ -1,3 +1,5 @@
+// src/pages/WebhookTestPage.tsx
+
 import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -35,12 +37,12 @@ const WebhookTestPage = ({
     setWebhookJobs
 }: WebhookTestPageProps) => {
     const { toast } = useToast();
-    
+
     const [emails, setEmails] = useState('');
     const [subject, setSubject] = useState('');
     const [content, setContent] = useState('');
     const [importFilter, setImportFilter] = useState<'all' | 'Success' | 'Failed'>('all');
-    
+
     const [isProjectDialogOpen, setProjectDialogOpen] = useState(false);
     const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
     const [projectName, setProjectName] = useState("");
@@ -63,7 +65,7 @@ const WebhookTestPage = ({
                     body: JSON.stringify({ siteId: selectedProject.siteId }),
                 });
                 const data = await response.json();
-                
+
                 if (data.status === 'running' || data.status === 'paused' || data.status === 'complete' || data.status === 'canceled') {
                     setWebhookJobs(prev => ({
                         ...prev,
@@ -90,7 +92,7 @@ const WebhookTestPage = ({
             } catch (error) {
                 console.error("Failed to fetch webhook job status:", error);
             }
-        }, 3000);
+        }, 1500); // <-- Changed from 3000 to 1500
 
         return () => clearInterval(intervalId);
     }, [currentJob?.isRunning, selectedProject, setWebhookJobs, toast]);
@@ -158,7 +160,7 @@ const WebhookTestPage = ({
             toast({ title: "Error Deleting Project", description: (error as Error).message, variant: "destructive" });
         }
     };
-    
+
     const handleCampaignFieldChange = (id: number, field: 'key' | 'value', value: string) => setCampaignFields(prev => prev.map(f => f.id === id ? { ...f, [field]: value } : f));
     const addCampaignField = () => setCampaignFields(prev => [...prev, { id: Date.now(), key: '', value: '' }]);
     const removeCampaignField = (id: number) => setCampaignFields(prev => prev.length > 1 ? prev.filter(f => f.id !== id) : [{ id: 1, key: '', value: '' }]);
@@ -171,9 +173,9 @@ const WebhookTestPage = ({
         if (emailList.length === 0 || !subject || !content) {
             toast({ title: "Missing Fields", description: "Emails, subject, and content are required.", variant: "destructive" }); return;
         }
-        
+
         setWebhookJobs(prev => ({ ...prev, [selectedProject.siteId]: { isRunning: true, isPaused: false, processed: 0, total: emailList.length, progress: 0, results: [] } }));
-        
+
         try {
             const res = await fetch('/api/headless-start-webhook-job', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -200,7 +202,7 @@ const WebhookTestPage = ({
             toast({ title: "Error", description: `Failed to ${action} job.`, variant: "destructive" });
         }
     };
-    
+
     const emailCount = emails.split(/[,\s\n]+/).filter(e => e.trim().includes('@')).length;
     const filteredResults = currentJob ? currentJob.results.filter(result => importFilter === 'all' || result.status === importFilter) : [];
 
@@ -308,7 +310,7 @@ const WebhookTestPage = ({
                             </CardContent>
                         </Card>
                     )}
-                    
+
                     {currentJob?.results && currentJob.results.length > 0 && (
                         <Card className="bg-gradient-card shadow-card border-primary/10">
                             <CardHeader className="flex flex-row justify-between items-center">
