@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogClose, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -10,12 +10,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Server, PlayCircle, CheckCircle, XCircle, FileJson, Trash2, Search, RefreshCw, Save, PlusCircle, Pencil, Download, ListChecks, Link, Link2, Send, PauseCircle, StopCircle, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import Navbar from '@/components/Navbar';
-import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Progress } from '@/components/ui/progress';
 import { jobManager, JobState } from '../lib/JobManager';
-import { DeleteJobState } from '../../App'; 
 
 const exportEmailsToTxt = (data: any[], filename: string) => {
     const emailKeys = ['email', 'loginEmail', 'emailAddress'];
@@ -44,20 +42,14 @@ type CampaignField = { id: number; key: string; value: string; };
 interface HeadlessImportPageProps {
   jobs: Record<string, JobState>;
   onJobStateChange: (siteId: string, updates: Partial<JobState>) => void;
-  deleteJobState: DeleteJobState;
-  onDeleteJobStateChange: (updates: Partial<DeleteJobState>) => void;
 }
 
-export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChange, deleteJobState, onDeleteJobStateChange }: HeadlessImportPageProps) {
-    const { isDeleteJobRunning, deleteProgress } = deleteJobState;
-    const [isSubmittingDelete, setIsSubmittingDelete] = useState(false);
+export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChange }: HeadlessImportPageProps) {
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | undefined>(undefined);
     const [searchQuery, setSearchQuery] = useState("");
     const [searchResults, setSearchResults] = useState<Member[]>([]);
-    const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
     const [isSearching, setIsSearching] = useState(false);
-    const [isDeleting, setIsDeleting] = useState(false);
     const { toast } = useToast();
     const [senderDetails, setSenderDetails] = useState<SenderDetails | null>(null);
     const [isFetchingSender, setIsFetchingSender] = useState(false);
@@ -72,9 +64,7 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
     const [isAllMembersDialogOpen, setAllMembersDialogOpen] = useState(false);
     const [allMembers, setAllMembers] = useState<Member[]>([]);
     const [isFetchingAllMembers, setIsFetchingAllMembers] = useState(false);
-    const [selectedAllMembers, setSelectedAllMembers] = useState<string[]>([]);
     const [filterQuery, setFilterQuery] = useState("");
-    const [allMembersFilterQuery, setAllMembersFilterQuery] = useState("");
     const [importFilter, setImportFilter] = useState<'all' | 'Success' | 'Failed'>('all');
     const [isLinkValidatorOpen, setLinkValidatorOpen] = useState(false);
     const [htmlToValidate, setHtmlToValidate] = useState('');
@@ -109,49 +99,11 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
         fetchProjects();
     }, [selectedProject, toast]);
 
-    useEffect(() => {
-        if (!isDeleteJobRunning || !selectedProject) return;
-    
-        const intervalId = setInterval(async () => {
-            try {
-                const response = await fetch('/api/headless-job-status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ siteId: selectedProject.siteId }),
-                });
-                const data = await response.json();
-    
-                if (data.status === 'stuck') {
-                    onDeleteJobStateChange({ isDeleteJobRunning: false });
-                    toast({ title: "Deletion Job Failed", description: data.error, variant: "destructive", duration: 10000 });
-                } else if (data.status === 'running') {
-                    const progressValue = (data.processed / data.total) * 100;
-                    onDeleteJobStateChange({ deleteProgress: { ...deleteProgress, processed: data.processed, total: data.total, step: data.step, progress: progressValue } });
-                } else if (data.status === 'complete') {
-                    onDeleteJobStateChange({ isDeleteJobRunning: false, deleteProgress: { ...deleteProgress, processed: data.total, progress: 100 } });
-                    toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
-                } else if (data.status === 'idle') {
-                    onDeleteJobStateChange({ isDeleteJobRunning: false });
-                }
-            } catch (error) {
-                console.error("Failed to fetch delete job status:", error);
-                onDeleteJobStateChange({ isDeleteJobRunning: false });
-            }
-        }, 2500);
-    
-        return () => clearInterval(intervalId);
-    }, [isDeleteJobRunning, selectedProject, toast, onDeleteJobStateChange]);
-
     const currentJob = selectedProject ? jobs[selectedProject.siteId] : undefined;
 
     const filteredSearchResults = searchResults.filter(member =>
         member.profile?.nickname?.toLowerCase().includes(filterQuery.toLowerCase()) ||
         member.loginEmail.toLowerCase().includes(filterQuery.toLowerCase())
-    );
-
-    const filteredAllMembers = allMembers.filter(member =>
-        member.profile?.nickname?.toLowerCase().includes(allMembersFilterQuery.toLowerCase()) ||
-        member.loginEmail.toLowerCase().includes(allMembersFilterQuery.toLowerCase())
     );
     
     const filteredImportResults = currentJob ? currentJob.results.filter(result => {
@@ -376,7 +328,6 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
         }
         setIsSearching(true);
         setSearchResults([]);
-        setSelectedMembers([]);
         try {
             const response = await fetch('/api/headless-search', {
                 method: 'POST',
@@ -393,39 +344,11 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
         }
     };
 
-    const handleDelete = async () => {
-        if (selectedMembers.length === 0) {
-            toast({ title: "No members selected", variant: "destructive" });
-            return;
-        }
-        setIsDeleting(true);
-        try {
-            const membersToDelete = searchResults
-                .filter(member => selectedMembers.includes(member.id))
-                .map(member => ({ memberId: member.id, contactId: member.contactId }));
-
-            const response = await fetch('/api/headless-delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject?.siteId, membersToDelete }),
-            });
-            if (!response.ok) throw new Error(`Error: ${response.statusText}`);
-            toast({ title: "Members deleted successfully" });
-            setSearchResults(searchResults.filter(member => !selectedMembers.includes(member.id)));
-            setSelectedMembers([]);
-        } catch (error) {
-            toast({ title: "Deletion failed", description: (error as Error).message, variant: "destructive" });
-        } finally {
-            setIsDeleting(false);
-        }
-    };
-
     const handleListAllMembers = async () => {
         if (!selectedProject) return;
         setAllMembersDialogOpen(true);
         setIsFetchingAllMembers(true);
         setAllMembers([]);
-        setSelectedAllMembers([]);
         try {
             const response = await fetch('/api/headless-list-all', {
                 method: 'POST',
@@ -442,58 +365,7 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
             setIsFetchingAllMembers(false);
         }
     };
-
-// src/headless/pages/HeadlessImportPage.tsx
-
-// src/headless/pages/HeadlessImportPage.tsx
-
-const handleDeleteAllSelected = async () => {
-    if (selectedAllMembers.length === 0 || !selectedProject) {
-        toast({ title: "No members selected", variant: "destructive" });
-        return;
-    }
-    setIsSubmittingDelete(true);
-
-    onDeleteJobStateChange({
-        isDeleteJobRunning: true,
-        deleteProgress: { processed: 0, total: 2, step: 'Starting job...', progress: 0 },
-    });
-
-    try {
-        // ★★★ THE FIX IS HERE ★★★
-        // Ensure that `loginEmail` is correctly mapped to `emailAddress`
-        const membersToDelete = allMembers
-            .filter(member => selectedAllMembers.includes(member.id))
-            .map(member => ({
-                memberId: member.id,
-                contactId: member.contactId,
-                emailAddress: member.loginEmail // This line was missing the correct field
-            }));
-
-        const response = await fetch('/api/headless-start-delete-job', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
-        });
-
-        if (!response.ok) {
-            const data = await response.json();
-            throw new Error(data.message || 'Failed to start deletion job.');
-        }
-
-        toast({ title: "Deletion Job Started", description: "The process is running in the background." });
-
-        setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
-        setSelectedAllMembers([]);
-
-    } catch (error: any) {
-        toast({ title: "Error Starting Job", description: error.message, variant: "destructive" });
-        onDeleteJobStateChange({ isDeleteJobRunning: false });
-    } finally {
-        setIsSubmittingDelete(false);
-    }
-};
-
+    
     const handleValidateLinks = async () => {
         if (!htmlToValidate || !selectedProject) {
             toast({ title: "Input Required", description: "Please select a project and enter some HTML to validate.", variant: "destructive" });
@@ -638,43 +510,27 @@ const handleDeleteAllSelected = async () => {
                             </Dialog>
                         </div>
                     </div>
-                    
-                    {isDeleteJobRunning && (
-                        <Card className="bg-gradient-card shadow-card border-primary/10">
-                            <CardHeader>
-                                <CardTitle>Bulk Deletion in Progress</CardTitle>
-                                <CardDescription>
-                                    Step {deleteProgress.processed} of {deleteProgress.total}: {deleteProgress.step || 'Initializing...'}
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent>
-                                <Progress value={deleteProgress.progress || 0} />
-                            </CardContent>
-                        </Card>
-                    )}
 
                     {(isSearching || searchResults.length > 0) && (
                         <Card className="bg-gradient-card shadow-card border-primary/10">
                             <CardHeader className="flex flex-row justify-between items-center">
                                 <div>
                                     <CardTitle>Search Results</CardTitle>
-                                    <CardDescription>Found {searchResults.length} member(s). Select members to delete.</CardDescription>
+                                    <CardDescription>Found {searchResults.length} member(s).</CardDescription>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <Input placeholder="Filter results..." value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} className="w-40 h-8" />
                                     <Button variant="outline" size="sm" onClick={() => exportEmailsToTxt(filteredSearchResults, 'search-results-emails')}><Download className="mr-2 h-4 w-4"/>Export Emails</Button>
                                 </div>
                             </CardHeader>
-                            <CardContent><div className="border rounded-lg overflow-hidden">
-                                <Table><TableHeader><TableRow><TableHead className="w-[40px]">#</TableHead><TableHead className="w-[50px]"><Checkbox checked={filteredSearchResults.length > 0 && selectedMembers.length === filteredSearchResults.length} onCheckedChange={(checked) => { const allMemberIds = checked ? filteredSearchResults.map(m => m.id) : []; setSelectedMembers(allMemberIds); }} /></TableHead><TableHead>Name</TableHead><TableHead>Email</TableHead></TableRow></TableHeader>
-                                    <TableBody>{filteredSearchResults.slice().reverse().map((member, index) => (<TableRow key={member.id}><TableCell>{index + 1}</TableCell><TableCell><Checkbox checked={selectedMembers.includes(member.id)} onCheckedChange={(checked) => { setSelectedMembers(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id)); }} /></TableCell><TableCell>{member.profile?.nickname || 'N/A'}</TableCell><TableCell>{member.loginEmail}</TableCell></TableRow>))}</TableBody>
-                                </Table>
-                            </div></CardContent>
-                            {selectedMembers.length > 0 && (<CardFooter><AlertDialog><AlertDialogTrigger asChild><Button variant="destructive" disabled={isDeleting}><Trash2 className="mr-2 h-4 w-4" />{isDeleting ? 'Deleting...' : `Delete (${selectedMembers.length}) Selected`}</Button></AlertDialogTrigger>
-                                <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Are you sure?</AlertDialogTitle><AlertDialogDescription>This will permanently delete the selected {selectedMembers.length} member(s). This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
-                                    <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Yes, Delete Members</AlertDialogAction></AlertDialogFooter>
-                                </AlertDialogContent>
-                            </AlertDialog></CardFooter>)}
+                            <CardContent>
+                                <div className="border rounded-lg overflow-hidden">
+                                    <Table>
+                                        <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Email</TableHead></TableRow></TableHeader>
+                                        <TableBody>{filteredSearchResults.map((member) => (<TableRow key={member.id}><TableCell>{member.profile?.nickname || 'N/A'}</TableCell><TableCell>{member.loginEmail}</TableCell></TableRow>))}</TableBody>
+                                    </Table>
+                                </div>
+                            </CardContent>
                         </Card>
                     )}
 
@@ -698,9 +554,7 @@ const handleDeleteAllSelected = async () => {
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
                                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                <AlertDialogAction onClick={() => {
-                                                    handleDeleteProject();
-                                                }}>
+                                                <AlertDialogAction onClick={handleDeleteProject}>
                                                     Continue
                                                 </AlertDialogAction>
                                             </AlertDialogFooter>
@@ -777,46 +631,26 @@ const handleDeleteAllSelected = async () => {
                         <DialogContent className="max-w-4xl">
                             <DialogHeader className="flex-row justify-between items-center">
                                 <div>
-                                    <DialogTitle>Manage All Members</DialogTitle>
-                                    <DialogDescription>View, select, and delete all members from this site.</DialogDescription>
+                                    <DialogTitle>All Members</DialogTitle>
+                                    <DialogDescription>View all members from this site.</DialogDescription>
                                 </div>
-                                 <div className="flex items-center gap-2">
-                                    <Input placeholder="Filter results..." value={allMembersFilterQuery} onChange={(e) => setAllMembersFilterQuery(e.target.value)} className="w-40 h-8" />
-                                    <Button variant="outline" size="sm" onClick={() => exportEmailsToTxt(filteredAllMembers, 'all-members-emails')}><Download className="mr-2 h-4 w-4"/>Export Emails</Button>
+                                <div className="flex items-center gap-2">
+                                    <Button variant="outline" size="sm" onClick={() => exportEmailsToTxt(allMembers, 'all-members-emails')}><Download className="mr-2 h-4 w-4"/>Export Emails</Button>
                                 </div>
                             </DialogHeader>
                             <div className="max-h-[60vh] overflow-y-auto">
-                                {isFetchingAllMembers ? <div className="text-center py-8"><RefreshCw className="h-8 w-8 animate-spin mx-auto text-muted-foreground" /></div> : filteredAllMembers.length > 0 ? (
+                                {isFetchingAllMembers ? <div className="text-center py-8"><RefreshCw className="h-8 w-8 animate-spin mx-auto text-muted-foreground" /></div> : allMembers.length > 0 ? (
                                     <Table>
                                         <TableHeader>
                                             <TableRow>
-                                                <TableHead className="w-[40px]">#</TableHead>
-                                                <TableHead className="w-[50px]">
-                                                    <Checkbox 
-                                                        checked={filteredAllMembers.length > 0 && selectedAllMembers.length === filteredAllMembers.length}
-                                                        onCheckedChange={(checked) => {
-                                                            const allMemberIds = checked ? filteredAllMembers.map(m => m.id) : [];
-                                                            setSelectedAllMembers(allMemberIds);
-                                                        }}
-                                                    />
-                                                </TableHead>
                                                 <TableHead>Name</TableHead>
                                                 <TableHead>Email</TableHead>
                                                 <TableHead>Status</TableHead>
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {filteredAllMembers.slice().reverse().map((member, index) => (
+                                            {allMembers.map((member) => (
                                                 <TableRow key={member.id}>
-                                                    <TableCell>{index + 1}</TableCell>
-                                                    <TableCell>
-                                                        <Checkbox 
-                                                            checked={selectedAllMembers.includes(member.id)}
-                                                            onCheckedChange={(checked) => {
-                                                                setSelectedAllMembers(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
-                                                            }}
-                                                        />
-                                                    </TableCell>
                                                     <TableCell>{member.profile?.nickname || 'N/A'}</TableCell>
                                                     <TableCell>{member.loginEmail}</TableCell>
                                                     <TableCell>{member.status}</TableCell>
@@ -826,28 +660,6 @@ const handleDeleteAllSelected = async () => {
                                     </Table>
                                 ) : <p className="text-center py-8 text-muted-foreground">No members found.</p>}
                             </div>
-                            {selectedAllMembers.length > 0 && (
-                                <DialogFooter>
-                                    <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                            <Button variant="destructive" disabled={isSubmittingDelete}>
-                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                {isSubmittingDelete ? 'Starting...' : `Delete (${selectedAllMembers.length}) Selected`}
-                                            </Button>
-                                        </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                            <AlertDialogHeader>
-                                                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                                <AlertDialogDescription>This action will start a background job to delete the selected {selectedAllMembers.length} member(s). You can close the window and the process will continue.</AlertDialogDescription>
-                                            </AlertDialogHeader>
-                                            <AlertDialogFooter>
-                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                <AlertDialogAction onClick={handleDeleteAllSelected} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Yes, Start Deletion Job</AlertDialogAction>
-                                            </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                    </AlertDialog>
-                                </DialogFooter>
-                            )}
                         </DialogContent>
                     </Dialog>
 
