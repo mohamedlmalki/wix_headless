@@ -37,12 +37,12 @@ const WebhookTestPage = ({
     setWebhookJobs
 }: WebhookTestPageProps) => {
     const { toast } = useToast();
-
+    
     const [emails, setEmails] = useState('');
     const [subject, setSubject] = useState('');
     const [content, setContent] = useState('');
     const [importFilter, setImportFilter] = useState<'all' | 'Success' | 'Failed'>('all');
-
+    
     const [isProjectDialogOpen, setProjectDialogOpen] = useState(false);
     const [dialogMode, setDialogMode] = useState<'add' | 'edit'>('add');
     const [projectName, setProjectName] = useState("");
@@ -59,13 +59,14 @@ const WebhookTestPage = ({
 
         const intervalId = setInterval(async () => {
             try {
-                const response = await fetch('/api/headless-webhook-job-status', {
+                // First, fetch the latest job status
+                const statusResponse = await fetch('/api/headless-webhook-job-status', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ siteId: selectedProject.siteId }),
                 });
-                const data = await response.json();
-
+                const data = await statusResponse.json();
+                
                 if (data.status === 'running' || data.status === 'paused' || data.status === 'complete' || data.status === 'canceled') {
                     setWebhookJobs(prev => ({
                         ...prev,
@@ -78,11 +79,23 @@ const WebhookTestPage = ({
                             results: data.results || [],
                         }
                     }));
+
                     if (data.status === 'complete') {
                         toast({ title: "Webhook Job Complete!", description: `Finished sending to ${data.total} emails.` });
+                        return;
                     }
                     if (data.status === 'canceled') {
                         toast({ title: "Webhook Job Canceled", description: "The job has been stopped." });
+                        return;
+                    }
+
+                    // If the job is running (not paused), trigger the next step
+                    if (data.status === 'running') {
+                        await fetch('/api/headless-webhook-job-processor', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ siteId: selectedProject.siteId }),
+                        });
                     }
                 } else if (data.status === 'stuck') {
                      setWebhookJobs(prev => ({...prev, [selectedProject.siteId]: { ...prev[selectedProject.siteId], isRunning: false }}));
@@ -92,7 +105,7 @@ const WebhookTestPage = ({
             } catch (error) {
                 console.error("Failed to fetch webhook job status:", error);
             }
-        }, 1500); // <-- Changed from 3000 to 1500
+        }, 1500);
 
         return () => clearInterval(intervalId);
     }, [currentJob?.isRunning, selectedProject, setWebhookJobs, toast]);
