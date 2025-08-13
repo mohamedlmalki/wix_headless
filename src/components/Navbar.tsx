@@ -45,17 +45,6 @@ const Navbar = () => {
               Bulk Delete
             </Button>
           </Link>
-          {/* Add the new link for the webhook test page */}
-          <Link to="/webhook-test">
-            <Button 
-              variant={isActive("/webhook-test") ? "default" : "ghost"} 
-              size="sm"
-              className="gap-2"
-            >
-              <Webhook size={16} />
-              Webhook Test
-            </Button>
-          </Link>
         </div>
       </div>
     </nav>
