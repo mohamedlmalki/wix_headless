@@ -51,9 +51,6 @@ export async function onRequestPost(context) {
                     jobState.status = 'running';
                     await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
                     await env.WIX_HEADLESS_CONFIG.delete(controlKey);
-                    
-                    // *** ADDED: 1-second delay after resuming as requested ***
-                    await delay(1000);
                 }
 
                 const email = emails[i];
@@ -81,7 +78,9 @@ export async function onRequestPost(context) {
                 
                 jobState.processed = i + 1;
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
-                await delay(1000); // The original delay between sending webhooks
+
+                // *** INCREASED DELAY: Wait 2 seconds between each request ***
+                await delay(2000); 
             }
 
             const finalJobState = JSON.parse(await env.WIX_HEADLESS_CONFIG.get(jobKey));
