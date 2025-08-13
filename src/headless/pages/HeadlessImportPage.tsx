@@ -443,51 +443,54 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
         }
     };
 
-    const handleDeleteAllSelected = async () => {
-        if (selectedAllMembers.length === 0 || !selectedProject) {
-            toast({ title: "No members selected", variant: "destructive" });
-            return;
-        }
-        setIsSubmittingDelete(true);
-    
-        // Set the initial state immediately for a good user experience
-        onDeleteJobStateChange({
-            isDeleteJobRunning: true,
-            deleteProgress: { processed: 0, total: 2, step: 'Starting job...', progress: 0 },
+// src/headless/pages/HeadlessImportPage.tsx
+
+const handleDeleteAllSelected = async () => {
+    if (selectedAllMembers.length === 0 || !selectedProject) {
+        toast({ title: "No members selected", variant: "destructive" });
+        return;
+    }
+    setIsSubmittingDelete(true);
+
+    onDeleteJobStateChange({
+        isDeleteJobRunning: true,
+        deleteProgress: { processed: 0, total: 2, step: 'Starting job...', progress: 0 },
+    });
+
+    try {
+        // ★★★ THE FIX IS HERE ★★★
+        // Ensure that `loginEmail` is correctly mapped to `emailAddress`
+        const membersToDelete = allMembers
+            .filter(member => selectedAllMembers.includes(member.id))
+            .map(member => ({
+                memberId: member.id,
+                contactId: member.contactId,
+                emailAddress: member.loginEmail // This line was missing the correct field
+            }));
+
+        const response = await fetch('/api/headless-start-delete-job', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
         });
-    
-        try {
-            const membersToDelete = allMembers
-                .filter(member => selectedAllMembers.includes(member.id))
-                .map(member => ({ 
-                    memberId: member.id, 
-                    contactId: member.contactId,
-                    emailAddress: member.loginEmail
-                }));
-    
-            const response = await fetch('/api/headless-start-delete-job', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
-            });
-    
-            if (!response.ok) {
-                const data = await response.json();
-                throw new Error(data.message || 'Failed to start deletion job.');
-            }
-    
-            toast({ title: "Deletion Job Started", description: "The process is running in the background." });
-    
-            setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
-            setSelectedAllMembers([]);
-    
-        } catch (error: any) {
-            toast({ title: "Error Starting Job", description: error.message, variant: "destructive" });
-            onDeleteJobStateChange({ isDeleteJobRunning: false });
-        } finally {
-            setIsSubmittingDelete(false);
+
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.message || 'Failed to start deletion job.');
         }
-    };
+
+        toast({ title: "Deletion Job Started", description: "The process is running in the background." });
+
+        setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
+        setSelectedAllMembers([]);
+
+    } catch (error: any) {
+        toast({ title: "Error Starting Job", description: error.message, variant: "destructive" });
+        onDeleteJobStateChange({ isDeleteJobRunning: false });
+    } finally {
+        setIsSubmittingDelete(false);
+    }
+};
 
     const handleValidateLinks = async () => {
         if (!htmlToValidate || !selectedProject) {
