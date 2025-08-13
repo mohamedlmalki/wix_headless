@@ -40,8 +40,8 @@ async function fetchAllMembers(project) {
   return allMembers;
 }
 
-// *** NEW: Fetches all members who are admins ***
-async function getAdminMemberIds(project) {
+// Fetches all members who are admins or the owner
+async function getAdminAndOwnerMemberIds(project) {
     const adminMemberIds = new Set();
     
     // First, get all available roles for the site
@@ -62,9 +62,13 @@ async function getAdminMemberIds(project) {
     
     const { roles } = await rolesResponse.json();
     
-    // Find the IDs of roles that are for site contributors (admins)
+    // Find the IDs of roles that are for site contributors (admins) or the Owner
     const adminRoleIds = roles
-        .filter(role => role.systemType === 'SITE_CONTRIBUTOR' || role.name === 'Admin')
+        .filter(role => 
+            role.systemType === 'SITE_CONTRIBUTOR' || 
+            role.name === 'Admin' || 
+            role.name === 'Owner'
+        )
         .map(role => role.id);
 
     if (adminRoleIds.length === 0) {
@@ -118,15 +122,11 @@ export async function onRequestPost({ request, env }) {
     // Fetch both lists in parallel
     const [allMembers, adminIds] = await Promise.all([
         fetchAllMembers(project),
-        getAdminMemberIds(project)
+        getAdminAndOwnerMemberIds(project)
     ]);
 
-    // Filter out admins from the role-based check AND filter out the site owner directly
-    const filteredMembers = allMembers.filter(member => {
-        const isOwner = member.mainRole === 'OWNER';
-        const isAdmin = adminIds.includes(member.id);
-        return !isOwner && !isAdmin;
-    });
+    // Filter out any member whose ID is in the admin/owner list
+    const filteredMembers = allMembers.filter(member => !adminIds.includes(member.id));
 
     return new Response(JSON.stringify({ members: filteredMembers }), {
       status: 200,
