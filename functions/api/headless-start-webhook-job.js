@@ -8,16 +8,22 @@ export async function onRequestPost(context) {
 
     // Start the background job
     context.waitUntil((async () => {
-        let jobState = { status: 'running', isPaused: false, processed: 0, total: emails.length, results: [] };
+        // Initialize the job state in the KV store
+        let jobState = { status: 'running', processed: 0, total: emails.length, results: [] };
         await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
 
         for (let i = 0; i < emails.length; i++) {
-            const currentStatus = JSON.parse(await env.WIX_HEADLESS_CONFIG.get(jobKey));
-            if (currentStatus.status === 'canceled') break;
-            if (currentStatus.status === 'paused') {
-                await delay(2000); // Wait while paused
-                i--; // Decrement to re-process this email
-                continue;
+            // *** FIX: Always read the most current job state from the server ***
+            let currentJobState = JSON.parse(await env.WIX_HEADLESS_CONFIG.get(jobKey));
+
+            // Check for control signals (pause or cancel)
+            if (currentJobState.status === 'canceled') {
+                break; // Exit the loop if the job is canceled
+            }
+            if (currentJobState.status === 'paused') {
+                await delay(2500); // Wait for a moment
+                i--; // Decrement 'i' to re-process the current email when resumed
+                continue; // Skip to the next loop iteration to re-check the status
             }
 
             const email = emails[i];
@@ -34,22 +40,27 @@ export async function onRequestPost(context) {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
                 });
                 if (wixResponse.ok) {
-                    jobState.results.push({ email, status: 'Success', reason: 'Sent successfully' });
+                    currentJobState.results.push({ email, status: 'Success', reason: 'Sent successfully' });
                 } else {
                     const errorText = await wixResponse.text();
-                    jobState.results.push({ email, status: 'Failed', reason: errorText || `Status ${wixResponse.status}` });
+                    currentJobState.results.push({ email, status: 'Failed', reason: errorText || `Status ${wixResponse.status}` });
                 }
             } catch (error) {
-                jobState.results.push({ email, status: 'Failed', reason: error.message });
+                currentJobState.results.push({ email, status: 'Failed', reason: error.message });
             }
             
-            jobState.processed = i + 1;
-            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
+            // Update progress and write the modified state back to the server
+            currentJobState.processed = i + 1;
+            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentJobState));
             await delay(1000); // Delay between each webhook
         }
 
-        jobState.status = 'complete';
-        await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
+        // Final update to mark the job as complete
+        let finalJobState = JSON.parse(await env.WIX_HEADLESS_CONFIG.get(jobKey));
+        if (finalJobState.status !== 'canceled') {
+            finalJobState.status = 'complete';
+            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(finalJobState));
+        }
     })());
 
     return new Response(JSON.stringify({ success: true, message: "Webhook job started." }), { status: 202 });
