@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Server, BarChart2, Trash2 } from "lucide-react"; 
+import { Server, BarChart2, Trash2, Webhook } from "lucide-react"; // Import Webhook icon
 
 const Navbar = () => {
   const location = useLocation();
@@ -43,6 +43,17 @@ const Navbar = () => {
             >
               <Trash2 size={16} />
               Bulk Delete
+            </Button>
+          </Link>
+          {/* Add the new link for the webhook test page */}
+          <Link to="/webhook-test">
+            <Button 
+              variant={isActive("/webhook-test") ? "default" : "ghost"} 
+              size="sm"
+              className="gap-2"
+            >
+              <Webhook size={16} />
+              Webhook Test
             </Button>
           </Link>
         </div>

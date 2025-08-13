@@ -10,6 +10,7 @@ import NotFound from "./pages/NotFound";
 import { HeadlessImportPage } from './headless/pages/HeadlessImportPage';
 import CampaignStatsPage, { CampaignStatsState } from './headless/pages/CampaignStatsPage';
 import BulkDeletePage from './headless/pages/BulkDeletePage';
+import WebhookTestPage from "./pages/WebhookTestPage"; // Import the new page
 import { jobManager, JobState } from './headless/lib/JobManager';
 
 const queryClient = new QueryClient();
@@ -76,6 +77,8 @@ const App = () => {
                             path="/bulk-delete"
                             element={<BulkDeletePage />}
                         />
+                        {/* Add the new route for the webhook test page */}
+                        <Route path="/webhook-test" element={<WebhookTestPage />} />
                         <Route path="*" element={<NotFound />} />
                     </Routes>
                 </BrowserRouter>
