@@ -4,8 +4,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea"; // Import Textarea
-import { Trash2, RefreshCw, Download, ListChecks, Terminal } from "lucide-react"; // Import Terminal Icon
+import { Textarea } from "@/components/ui/textarea";
+import { Trash2, RefreshCw, Download, ListChecks, Terminal } from "lucide-react";
 import Navbar from '@/components/Navbar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -70,12 +70,11 @@ const BulkDeletePage = () => {
         isDeleteJobRunning: false,
         deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
     });
-    const [logs, setLogs] = useState<string[]>([]); // State for logging
+    const [logs, setLogs] = useState<string[]>([]);
     const { toast } = useToast();
     const pollingIntervalRef = useRef<number | null>(null);
     const logContainerRef = useRef<HTMLTextAreaElement>(null);
 
-    // Auto-scroll for the log textarea
     useEffect(() => {
         if (logContainerRef.current) {
             logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
@@ -94,7 +93,7 @@ const BulkDeletePage = () => {
                 if (response.ok) {
                     const projects = await response.json();
                     setHeadlessProjects(projects);
-                    if (projects.length > 0) {
+                    if (projects.length > 0 && !selectedProject) {
                         setSelectedProject(projects[0]);
                     }
                 }
@@ -117,7 +116,7 @@ const BulkDeletePage = () => {
         stopPolling();
         
         pollingIntervalRef.current = window.setInterval(async () => {
-            if (!selectedProject) {
+            if (!selectedProject?.siteId) {
                 stopPolling();
                 return;
             }
@@ -171,7 +170,7 @@ const BulkDeletePage = () => {
     }, [deleteJobState.isDeleteJobRunning, selectedProject]);
     
     useEffect(() => {
-        if (!selectedProject) return;
+        if (!selectedProject?.siteId) return;
         setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
         setLogs([]);
         const checkInitialJobStatus = async () => {
@@ -194,7 +193,7 @@ const BulkDeletePage = () => {
     }, [selectedProject]);
     
     const handleListAllMembers = async () => {
-        if (!selectedProject) return;
+        if (!selectedProject?.siteId) return;
         setIsFetchingAllMembers(true);
         setAllMembers([]);
         setSelectedAllMembers([]);
@@ -215,12 +214,12 @@ const BulkDeletePage = () => {
     };
 
     const handleDeleteAllSelected = async () => {
-        if (selectedAllMembers.length === 0 || !selectedProject) {
-            toast({ title: "No members selected", variant: "destructive" });
+        if (selectedAllMembers.length === 0 || !selectedProject?.siteId) {
+            toast({ title: "No members selected or project not found", variant: "destructive" });
             return;
         }
 
-        setLogs([]); // Clear logs on new job start
+        setLogs([]);
         addLog(`Starting deletion job for ${selectedAllMembers.length} members...`);
 
         try {
@@ -267,7 +266,7 @@ const BulkDeletePage = () => {
     };
 
     const handleResetJob = async () => {
-        if (!selectedProject) return;
+        if (!selectedProject?.siteId) return;
         addLog("Attempting to reset job status on the server...");
         try {
             await fetch('/api/headless-reset-job', {
@@ -286,6 +285,20 @@ const BulkDeletePage = () => {
             toast({ title: "Error", description: "Could not reset the job status.", variant: "destructive" });
         }
     };
+    
+    const handleProjectChange = (siteId: string) => {
+        const project = headlessProjects.find(p => p.siteId === siteId);
+        setSelectedProject(project || null);
+        // Reset all states related to the previous project
+        setAllMembers([]);
+        setSelectedAllMembers([]);
+        setAllMembersFilterQuery("");
+        setLogs([]);
+        setDeleteJobState({
+            isDeleteJobRunning: false,
+            deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
+        });
+    };
 
     const filteredAllMembers = allMembers.filter(member =>
         member.profile?.nickname?.toLowerCase().includes(allMembersFilterQuery.toLowerCase()) ||
@@ -297,7 +310,6 @@ const BulkDeletePage = () => {
             <Navbar />
             <div className="container mx-auto px-4 pt-24 pb-12">
                 <div className="max-w-4xl mx-auto space-y-8">
-                    {/* ... (Header and Project Selection Cards remain the same) ... */}
                     <div className="flex items-center gap-4 animate-fade-in">
                         <Trash2 className="h-10 w-10 text-destructive" />
                         <div>
@@ -311,14 +323,7 @@ const BulkDeletePage = () => {
                             <CardTitle>Select Project</CardTitle>
                         </CardHeader>
                         <CardContent className="flex gap-4">
-                            <Select onValueChange={(siteId) => {
-                                const project = headlessProjects.find(p => p.siteId === siteId);
-                                setSelectedProject(project || null);
-                                setAllMembers([]);
-                                setSelectedAllMembers([]);
-                            }}
-                            value={selectedProject?.siteId}
-                            >
+                            <Select onValueChange={handleProjectChange} value={selectedProject?.siteId || ""}>
                                 <SelectTrigger>
                                     <SelectValue placeholder="Select a project..." />
                                 </SelectTrigger>
