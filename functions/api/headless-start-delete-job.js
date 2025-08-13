@@ -1,80 +1,46 @@
-// functions/api/headless-start-delete-job.js
+// This is a temporary version for debugging the 403 error.
+// It performs the action directly instead of in the background.
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-function chunkArray(array, size) {
-  const chunks = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-}
-
-async function getErrorDetails(response) {
-    const errorText = await response.text();
+export async function onRequestPost({ request, env }) {
     try {
-        return JSON.stringify(JSON.parse(errorText));
-    } catch (e) {
-        return errorText || "No additional error details were provided by the API.";
-    }
-}
+        const { siteId, membersToDelete } = await request.json();
 
-export async function onRequestPost(context) {
-    const { request, env } = context;
-    const { siteId, membersToDelete } = await request.json();
-    const jobKey = `delete_job_${siteId}`;
-
-    try {
-        // ★★★ THE TYPO IS FIXED HERE ★★★
+        // 1. Get Project Config
         const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
-        if (!projectsJson) throw new Error("Could not retrieve project configurations.");
+        if (!projectsJson) {
+            return new Response(JSON.stringify({ message: "Could not retrieve project configurations." }), { status: 500 });
+        }
         
         const project = projectsJson.find(p => p.siteId === siteId);
-        if (!project) return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
+        if (!project) {
+            return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
+        }
 
-        const doMemberDeletion = async () => {
-            let currentState = {};
-            try {
-                const memberIds = membersToDelete.map(m => m.memberId);
-                const memberIdChunks = chunkArray(memberIds, 100);
-                
-                const totalSteps = memberIdChunks.length;
-                let stepsCompleted = 0;
+        // 2. Prepare Member Deletion
+        const memberIds = membersToDelete.map(m => m.memberId);
+        if (memberIds.length > 100) {
+             return new Response(JSON.stringify({ message: "For this test, please select 100 or fewer members." }), { status: 400 });
+        }
 
-                // --- STEP 1: Bulk Delete All Member Chunks ---
-                for (let i = 0; i < memberIdChunks.length; i++) {
-                    stepsCompleted++;
-                    currentState = { status: 'running', processed: stepsCompleted, total: totalSteps, step: `Deleting member batch ${i + 1} of ${memberIdChunks.length}` };
-                    await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
-                    
-                    const memberDeleteRes = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
-                        method: 'POST',
-                        headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ "memberIds": memberIdChunks[i] })
-                    });
-                    
-                    if (!memberDeleteRes.ok) {
-                        const errorDetails = await getErrorDetails(memberDeleteRes);
-                        throw new Error(`Failed on member batch ${i + 1}. API responded with status ${memberDeleteRes.status}: ${errorDetails}`);
-                    }
-                }
-
-                // --- FINAL STEP: Mark job as complete ---
-                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'complete', processed: totalSteps, total: totalSteps, step: 'Member deletion complete!' }));
-
-            } catch (error) {
-                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ ...currentState, status: 'stuck', error: error.message }));
-            }
-        };
+        // 3. Call Wix API directly and await the response
+        const wixResponse = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
+            method: 'POST',
+            headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ "memberIds": memberIds })
+        });
         
-        context.waitUntil(doMemberDeletion());
+        // 4. Forward the exact response (or error) from Wix back to the frontend
+        const responseBody = await wixResponse.text();
+        const responseHeaders = new Headers(wixResponse.headers);
+        responseHeaders.set('Content-Type', 'application/json');
 
-        return new Response(JSON.stringify({ success: true, message: "Bulk member deletion job started." }), {
-            status: 202,
-            headers: { 'Content-Type': 'application/json' },
+        return new Response(responseBody, {
+            status: wixResponse.status,
+            statusText: wixResponse.statusText,
+            headers: responseHeaders
         });
 
     } catch (e) {
-        return new Response(JSON.stringify({ message: 'An error occurred starting the job.', error: e.message }), { status: 500 });
+        return new Response(JSON.stringify({ message: 'An error occurred in the Cloudflare function.', error: e.message }), { status: 500 });
     }
 }
