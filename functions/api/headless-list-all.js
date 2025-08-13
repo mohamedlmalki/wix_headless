@@ -40,7 +40,7 @@ async function fetchAllMembers(project) {
   return allMembers;
 }
 
-// Fetches all members who are admins or contributors
+// *** NEW: Fetches all members who are admins ***
 async function getAdminMemberIds(project) {
     const adminMemberIds = new Set();
     
