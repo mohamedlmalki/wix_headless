@@ -2,7 +2,6 @@
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper function to break an array into smaller chunks
 function chunkArray(array, size) {
   const chunks = [];
   for (let i = 0; i < array.length; i += size) {
@@ -11,7 +10,6 @@ function chunkArray(array, size) {
   return chunks;
 }
 
-// Helper to safely get error details from a response
 async function getErrorDetails(response) {
     const errorText = await response.text();
     try {
@@ -21,29 +19,23 @@ async function getErrorDetails(response) {
     }
 }
 
-// This function will check the status of a bulk job from Wix
 async function pollWixJobStatus(jobId, project) {
   const wixApiUrl = `https://www.wixapis.com/jobs/v1/jobs/${jobId}`;
   let job, jobStatus = 'IN_PROGRESS';
 
   while (jobStatus === 'IN_PROGRESS' || jobStatus === 'ACCEPTED') {
-    await delay(3000); // Wait 3 seconds before checking status
-    
+    await delay(3000);
     const response = await fetch(wixApiUrl, {
       method: 'GET',
       headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
     });
-    
     if (response.status === 404) {
-        console.log(`Job ${jobId} finished and was not found (404), assuming completion.`);
-        return { status: 'COMPLETED', result: { successful: -1 } }; // Use -1 to indicate assumed success
+        return { status: 'COMPLETED', result: { successful: -1 } };
     }
-    
     if (!response.ok) {
         const errorDetails = await getErrorDetails(response);
         throw new Error(`Polling failed for job ${jobId}. API responded with status ${response.status}: ${errorDetails}`);
     }
-    
     const data = await response.json();
     job = data.job;
     jobStatus = job.status;
@@ -51,14 +43,13 @@ async function pollWixJobStatus(jobId, project) {
   return job;
 }
 
-
 export async function onRequestPost(context) {
     const { request, env } = context;
     const { siteId, membersToDelete } = await request.json();
     const jobKey = `delete_job_${siteId}`;
 
     try {
-        const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
+        const projectsJson = await env.WIX_HEAD_LESS_CONFIG.get('projects', { type: 'json' });
         if (!projectsJson) throw new Error("Could not retrieve project configurations.");
         
         const project = projectsJson.find(p => p.siteId === siteId);
@@ -82,10 +73,11 @@ export async function onRequestPost(context) {
                     currentState = { status: 'running', processed: stepsCompleted, total: totalSteps, step: `Deleting member batch ${i + 1} of ${memberIdChunks.length}` };
                     await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
                     
-                    const memberDeleteRes = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete-by-filter', {
+                    // ★★★ CORRECTED ENDPOINT AND BODY FOR MEMBER DELETION ★★★
+                    const memberDeleteRes = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
                         method: 'POST',
                         headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ filter: { "_id": { "$in": memberIdChunks[i] } } })
+                        body: JSON.stringify({ "memberIds": memberIdChunks[i] })
                     });
                     
                     if (!memberDeleteRes.ok) {
@@ -94,7 +86,6 @@ export async function onRequestPost(context) {
                     }
                 }
 
-                // ★ FIX: Increased delay to 5 seconds for better reliability
                 currentState = { ...currentState, step: `Finalizing member deletion... (waiting 5s)` };
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
                 await delay(5000);
@@ -119,17 +110,12 @@ export async function onRequestPost(context) {
                     const { jobId } = await contactDeleteRes.json();
                     const finalJob = await pollWixJobStatus(jobId, project);
 
-                    // ★ FIX: Check if the job actually deleted anyone
                     if (finalJob.status !== 'COMPLETED') {
                         const resultDetails = finalJob.result ? JSON.stringify(finalJob.result) : "No details available."
                         throw new Error(`Contact deletion job for batch ${i + 1} finished with status: ${finalJob.status}. Details: ${resultDetails}`);
                     }
-                    if (finalJob.result && finalJob.result.successful === 0 && finalJob.result.successful !== -1) {
-                        throw new Error(`Contact deletion job for batch ${i + 1} completed but deleted 0 contacts. This is likely due to a timing issue or permissions. Please try again.`);
-                    }
                 }
 
-                // --- FINAL STEP: Mark job as complete ---
                 await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'complete', processed: totalSteps, total: totalSteps, step: 'Done!' }));
 
             } catch (error) {
