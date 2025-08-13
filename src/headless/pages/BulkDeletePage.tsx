@@ -4,7 +4,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Trash2, RefreshCw, Download, ListChecks } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea"; // Import Textarea
+import { Trash2, RefreshCw, Download, ListChecks, Terminal } from "lucide-react"; // Import Terminal Icon
 import Navbar from '@/components/Navbar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -69,8 +70,22 @@ const BulkDeletePage = () => {
         isDeleteJobRunning: false,
         deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
     });
+    const [logs, setLogs] = useState<string[]>([]); // State for logging
     const { toast } = useToast();
     const pollingIntervalRef = useRef<number | null>(null);
+    const logContainerRef = useRef<HTMLTextAreaElement>(null);
+
+    // Auto-scroll for the log textarea
+    useEffect(() => {
+        if (logContainerRef.current) {
+            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+        }
+    }, [logs]);
+
+    const addLog = (message: string) => {
+        const timestamp = new Date().toLocaleTimeString();
+        setLogs(prevLogs => [...prevLogs, `[${timestamp}] ${message}`]);
+    };
 
     useEffect(() => {
         const fetchProjects = async () => {
@@ -84,6 +99,7 @@ const BulkDeletePage = () => {
                     }
                 }
             } catch (error) {
+                addLog(`Error loading projects: ${(error as Error).message}`);
                 toast({ title: "Error", description: "Could not load projects.", variant: "destructive" });
             }
         };
@@ -98,7 +114,7 @@ const BulkDeletePage = () => {
     };
 
     const startPolling = () => {
-        stopPolling(); // Ensure no multiple intervals are running
+        stopPolling();
         
         pollingIntervalRef.current = window.setInterval(async () => {
             if (!selectedProject) {
@@ -116,12 +132,16 @@ const BulkDeletePage = () => {
                 const data = await response.json();
 
                 if (data.status === 'running') {
+                    if(data.step !== deleteJobState.deleteProgress.step) {
+                        addLog(data.step);
+                    }
                     const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
                     setDeleteJobState({
                         isDeleteJobRunning: true,
-                        deleteProgress: { processed: data.processed, total: data.total, step: data.step, progress: progressValue }
+                        deleteProgress: { ...data, progress: progressValue }
                     });
                 } else if (data.status === 'complete') {
+                    addLog("Job completed successfully!");
                     setDeleteJobState({
                         isDeleteJobRunning: false,
                         deleteProgress: { processed: data.total, total: data.total, progress: 100, step: 'Complete!' }
@@ -129,11 +149,12 @@ const BulkDeletePage = () => {
                     toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
                     stopPolling();
                 } else if (data.status === 'idle') {
+                     addLog("Job is now idle. Stopping polling.");
                      setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
                      stopPolling();
                 }
             } catch (error) {
-                console.error("Failed to fetch delete job status:", error);
+                addLog(`Polling error: ${(error as Error).message}`);
                 toast({ title: "Polling Error", description: "Could not get job status. Try resetting the job.", variant: "destructive" });
                 stopPolling();
             }
@@ -146,12 +167,13 @@ const BulkDeletePage = () => {
         } else {
             stopPolling();
         }
-        return () => stopPolling(); // Cleanup on unmount
+        return () => stopPolling();
     }, [deleteJobState.isDeleteJobRunning, selectedProject]);
     
     useEffect(() => {
         if (!selectedProject) return;
         setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
+        setLogs([]);
         const checkInitialJobStatus = async () => {
             try {
                 const response = await fetch('/api/headless-job-status', {
@@ -161,6 +183,7 @@ const BulkDeletePage = () => {
                 });
                 const data = await response.json();
                 if (data.status === 'running') {
+                    addLog("Found a job already in progress...");
                     setDeleteJobState({ isDeleteJobRunning: true, deleteProgress: data });
                 }
             } catch (error) {
@@ -197,6 +220,9 @@ const BulkDeletePage = () => {
             return;
         }
 
+        setLogs([]); // Clear logs on new job start
+        addLog(`Starting deletion job for ${selectedAllMembers.length} members...`);
+
         try {
             const membersToDelete = allMembers
                 .filter(member => selectedAllMembers.includes(member.id))
@@ -227,12 +253,14 @@ const BulkDeletePage = () => {
                 throw new Error(errorMessage);
             }
 
+            addLog("Job successfully started on the server. Polling for status...");
             toast({ title: "Deletion Job Started", description: "The process is running in the background." });
 
             setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
             setSelectedAllMembers([]);
 
         } catch (error: any) {
+            addLog(`Error starting job: ${error.message}`);
             toast({ title: "Error Starting Job", description: error.message, variant: "destructive" });
             setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: 'Failed to start', progress: 0 } });
         }
@@ -240,6 +268,7 @@ const BulkDeletePage = () => {
 
     const handleResetJob = async () => {
         if (!selectedProject) return;
+        addLog("Attempting to reset job status on the server...");
         try {
             await fetch('/api/headless-reset-job', {
                 method: 'POST',
@@ -250,8 +279,10 @@ const BulkDeletePage = () => {
                 isDeleteJobRunning: false,
                 deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
             });
+            addLog("Job status has been successfully reset.");
             toast({ title: "Job Reset", description: "The deletion job status has been cleared." });
         } catch (error) {
+            addLog(`Error resetting job: ${(error as Error).message}`);
             toast({ title: "Error", description: "Could not reset the job status.", variant: "destructive" });
         }
     };
@@ -266,6 +297,7 @@ const BulkDeletePage = () => {
             <Navbar />
             <div className="container mx-auto px-4 pt-24 pb-12">
                 <div className="max-w-4xl mx-auto space-y-8">
+                    {/* ... (Header and Project Selection Cards remain the same) ... */}
                     <div className="flex items-center gap-4 animate-fade-in">
                         <Trash2 className="h-10 w-10 text-destructive" />
                         <div>
@@ -305,16 +337,32 @@ const BulkDeletePage = () => {
                         </CardContent>
                     </Card>
 
-                    {deleteJobState.isDeleteJobRunning && (
+                    {(deleteJobState.isDeleteJobRunning || logs.length > 0) && (
                         <Card className="bg-gradient-card shadow-card border-primary/10">
                             <CardHeader>
                                 <CardTitle>Bulk Deletion in Progress</CardTitle>
-                                <CardDescription>
-                                    {deleteJobState.deleteProgress.step || 'Initializing...'}
-                                </CardDescription>
+                                {deleteJobState.isDeleteJobRunning && (
+                                     <CardDescription>
+                                        {deleteJobState.deleteProgress.step || 'Initializing...'}
+                                    </CardDescription>
+                                )}
                             </CardHeader>
-                            <CardContent>
-                                <Progress value={deleteJobState.deleteProgress.progress || 0} />
+                            <CardContent className="space-y-4">
+                                {deleteJobState.isDeleteJobRunning && (
+                                     <Progress value={deleteJobState.deleteProgress.progress || 0} />
+                                )}
+                                <div className="flex items-center gap-2">
+                                     <Terminal className="h-5 w-5 text-muted-foreground" />
+                                     <Label htmlFor="logs">Live Logs</Label>
+                                </div>
+                                <Textarea
+                                    id="logs"
+                                    ref={logContainerRef}
+                                    readOnly
+                                    value={logs.join('\n')}
+                                    className="h-40 resize-y bg-black font-mono text-xs text-green-400"
+                                    placeholder="Logs will appear here..."
+                                />
                             </CardContent>
                         </Card>
                     )}
