@@ -90,11 +90,6 @@ export async function onRequestPost(context) {
                         const errorDetails = await getErrorDetails(memberDeleteRes);
                         throw new Error(`Failed on member batch ${i + 1}. API responded with status ${memberDeleteRes.status}: ${errorDetails}`);
                     }
-
-                    // *** ADDED DELAY TO PREVENT RATE LIMITING ***
-                    if (i < memberIdChunks.length - 1) {
-                        await delay(2000); // Wait for 2 seconds before the next batch
-                    }
                 }
 
                 currentState = { ...currentState, step: `Finalizing member deletion... (waiting 5s)` };
