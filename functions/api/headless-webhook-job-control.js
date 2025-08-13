@@ -5,6 +5,11 @@ export async function onRequestPost({ request, env }) {
         const { siteId, action } = await request.json();
         const jobKey = `webhook_job_${siteId}`;
 
+        if (action === 'cancel') {
+            await env.WIX_HEADLESS_CONFIG.delete(jobKey);
+            return new Response(JSON.stringify({ success: true, message: "Job canceled and state cleared." }), { status: 200 });
+        }
+
         const jobStateString = await env.WIX_HEADLESS_CONFIG.get(jobKey);
         if (!jobStateString) {
             return new Response(JSON.stringify({ message: "Job not found." }), { status: 404 });
@@ -16,8 +21,6 @@ export async function onRequestPost({ request, env }) {
             jobState.status = 'paused';
         } else if (action === 'resume') {
             jobState.status = 'running';
-        } else if (action === 'cancel') {
-            jobState.status = 'canceled';
         }
 
         await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
