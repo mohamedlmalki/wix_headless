@@ -60,9 +60,16 @@ export async function onRequestPost({ request, env }) {
       });
     }
 
-    const allMembers = await fetchAllMembers(project); // The helper function needs the project info from KV
+    const allMembers = await fetchAllMembers(project);
 
-    return new Response(JSON.stringify({ members: allMembers }), {
+    // *** NEW: Filter out any member that has the "Admin" role ***
+    const filteredMembers = allMembers.filter(member => {
+        // Check if the member has a 'roles' array and if that array includes a role named "Admin"
+        const isAdmin = member.roles && member.roles.some(role => role.name === 'Admin');
+        return !isAdmin;
+    });
+
+    return new Response(JSON.stringify({ members: filteredMembers }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
