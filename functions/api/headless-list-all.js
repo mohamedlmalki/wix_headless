@@ -40,7 +40,7 @@ async function fetchAllMembers(project) {
   return allMembers;
 }
 
-// *** NEW: Fetches all members who are admins ***
+// Fetches all members who are admins or contributors
 async function getAdminMemberIds(project) {
     const adminMemberIds = new Set();
     
@@ -121,8 +121,12 @@ export async function onRequestPost({ request, env }) {
         getAdminMemberIds(project)
     ]);
 
-    // Filter out the admins from the main member list
-    const filteredMembers = allMembers.filter(member => !adminIds.includes(member.id));
+    // Filter out admins from the role-based check AND filter out the site owner directly
+    const filteredMembers = allMembers.filter(member => {
+        const isOwner = member.mainRole === 'OWNER';
+        const isAdmin = adminIds.includes(member.id);
+        return !isOwner && !isAdmin;
+    });
 
     return new Response(JSON.stringify({ members: filteredMembers }), {
       status: 200,
