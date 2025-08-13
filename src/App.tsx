@@ -18,7 +18,7 @@ export interface HeadlessProject {
     siteId: string;
     apiKey: string;
     campaigns?: { [key: string]: string; };
-    webhookUrl?: string;
+    ownerEmail?: string; // ★★★ CHANGED THIS LINE
 }
 
 const queryClient = new QueryClient();
