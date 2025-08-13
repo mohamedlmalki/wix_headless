@@ -351,6 +351,32 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
         }
     };
 
+    const handleDeleteMember = async (member: Member) => {
+        if (!selectedProject) {
+            toast({ title: "No project selected", variant: "destructive" });
+            return;
+        }
+        try {
+            const response = await fetch('/api/headless-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    siteId: selectedProject.siteId,
+                    membersToDelete: [{
+                        memberId: member.id,
+                        contactId: member.contactId
+                    }]
+                }),
+            });
+            if (!response.ok) {
+                throw new Error('Failed to delete member.');
+            }
+            toast({ title: "Member Deleted", description: `Successfully deleted ${member.loginEmail}.` });
+            setSearchResults(searchResults.filter(m => m.id !== member.id));
+        } catch (error) {
+            toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
+        }
+    };
     const handleListAllMembers = async () => {
         if (!selectedProject) return;
         setAllMembersDialogOpen(true);
@@ -533,8 +559,34 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
                             <CardContent>
                                 <div className="border rounded-lg overflow-hidden">
                                     <Table>
-                                        <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Email</TableHead></TableRow></TableHeader>
-                                        <TableBody>{filteredSearchResults.map((member) => (<TableRow key={member.id}><TableCell>{member.profile?.nickname || 'N/A'}</TableCell><TableCell>{member.loginEmail}</TableCell></TableRow>))}</TableBody>
+                                        <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                                        <TableBody>
+                                            {filteredSearchResults.map((member) => (
+                                                <TableRow key={member.id}>
+                                                    <TableCell>{member.profile?.nickname || 'N/A'}</TableCell>
+                                                    <TableCell>{member.loginEmail}</TableCell>
+                                                    <TableCell className="text-right">
+                                                        <AlertDialog>
+                                                            <AlertDialogTrigger asChild>
+                                                                <Button variant="destructive" size="sm"><Trash2 className="h-4 w-4" /></Button>
+                                                            </AlertDialogTrigger>
+                                                            <AlertDialogContent>
+                                                                <AlertDialogHeader>
+                                                                    <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                                                    <AlertDialogDescription>
+                                                                        This action will permanently delete the member "{member.loginEmail}". This cannot be undone.
+                                                                    </AlertDialogDescription>
+                                                                </AlertDialogHeader>
+                                                                <AlertDialogFooter>
+                                                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                                    <AlertDialogAction onClick={() => handleDeleteMember(member)}>Delete</AlertDialogAction>
+                                                                </AlertDialogFooter>
+                                                            </AlertDialogContent>
+                                                        </AlertDialog>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
                                     </Table>
                                 </div>
                             </CardContent>
