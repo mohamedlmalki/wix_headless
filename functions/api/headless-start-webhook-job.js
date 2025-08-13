@@ -20,10 +20,21 @@ export async function onRequestPost(context) {
             if (currentJobState.status === 'canceled') {
                 break; // Exit the loop if the job is canceled
             }
-            if (currentJobState.status === 'paused') {
+
+            // *** FIX: Implement a while loop to handle the paused state ***
+            while (currentJobState.status === 'paused') {
                 await delay(2500); // Wait for a moment
-                i--; // Decrement 'i' to re-process the current email when resumed
-                continue; // Skip to the next loop iteration to re-check the status
+                // Re-fetch the state to see if it has changed
+                currentJobState = JSON.parse(await env.WIX_HEADLESS_CONFIG.get(jobKey));
+                if (currentJobState.status === 'canceled') {
+                    // Also check for cancellation inside the pause loop
+                    break;
+                }
+            }
+            
+            // If the job was cancelled while paused, break the outer loop too
+            if (currentJobState.status === 'canceled') {
+                break;
             }
 
             const email = emails[i];
