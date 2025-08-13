@@ -13,6 +13,37 @@ async function getErrorDetails(response) {
     }
 }
 
+// Function to delete a single member and their contact
+async function deleteSingleMember(member, project) {
+    // Step 1: Delete the Member
+    const memberDeleteRes = await fetch(`https://www.wixapis.com/members/v1/members/${member.memberId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
+    });
+
+    if (!memberDeleteRes.ok && memberDeleteRes.status !== 404) {
+        const errorDetails = await getErrorDetails(memberDeleteRes);
+        console.error(`Failed to delete member ${member.memberId}. Status: ${memberDeleteRes.status}. Details: ${errorDetails}`);
+        // We throw here to signal failure for this specific member
+        throw new Error(`Member deletion failed for ${member.memberId}`);
+    }
+
+    // A small delay between member and contact deletion
+    await delay(200);
+
+    // Step 2: Delete the associated Contact
+    const contactDeleteRes = await fetch(`https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
+    });
+
+    if (!contactDeleteRes.ok && contactDeleteRes.status !== 404) {
+        const errorDetails = await getErrorDetails(contactDeleteRes);
+         // This is a non-critical failure, as the member is deleted. We can just log it.
+        console.error(`Failed to delete contact ${member.contactId}. Details: ${errorDetails}`);
+    }
+}
+
 export async function onRequestPost(context) {
     const { request, env } = context;
     const { siteId, membersToDelete } = await request.json();
@@ -25,69 +56,48 @@ export async function onRequestPost(context) {
         const project = projectsJson.find(p => p.siteId === siteId);
         if (!project) return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
 
-        // This function runs in the background
-        const doIndividualDeletion = async () => {
-            let currentState = {};
+        const doParallelDeletion = async () => {
             const totalMembers = membersToDelete.length;
-            
-            try {
-                for (let i = 0; i < totalMembers; i++) {
-                    const member = membersToDelete[i];
-                    currentState = { 
-                        status: 'running', 
-                        processed: i + 1, 
-                        total: totalMembers, 
-                        step: `Deleting ${member.emailAddress || member.memberId}` 
-                    };
-                    await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
+            let processedCount = 0;
 
-                    // Step 1: Delete the Member using the single-delete endpoint
-                    const memberDeleteRes = await fetch(`https://www.wixapis.com/members/v1/members/${member.memberId}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
-                    });
+            // Process in parallel batches of 100 to maximize speed
+            const batchSize = 100;
 
-                    // A 404 error means the member is already gone, which is okay.
-                    if (!memberDeleteRes.ok && memberDeleteRes.status !== 404) {
-                        const errorDetails = await getErrorDetails(memberDeleteRes);
-                        console.error(`Skipping member ${member.memberId} due to error: ${errorDetails}`);
-                        continue; // Skip to the next member
-                    }
-                    
-                    // A smaller delay to speed up the process while staying safe.
-                    await delay(250);
+            for (let i = 0; i < totalMembers; i += batchSize) {
+                const batch = membersToDelete.slice(i, i + batchSize);
+                
+                // Create a promise for each deletion in the batch
+                const deletePromises = batch.map(member => 
+                    deleteSingleMember(member, project).catch(e => console.error(e.message))
+                );
 
-                    // Step 2: Delete the associated Contact
-                    const contactDeleteRes = await fetch(`https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
-                    });
+                // Wait for the current batch to complete
+                await Promise.all(deletePromises);
 
-                    if (!contactDeleteRes.ok && contactDeleteRes.status !== 404) {
-                        const errorDetails = await getErrorDetails(contactDeleteRes);
-                         // Log the error but continue the job
-                        console.error(`Failed to delete contact ${member.contactId}. Details: ${errorDetails}`);
-                    }
-                }
-
-                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'complete', processed: totalMembers, total: totalMembers, step: 'Done!' }));
-
-            } catch (error) {
-                // This will catch critical errors in the loop itself
-                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ ...currentState, status: 'stuck', error: error.message }));
+                processedCount += batch.length;
+                
+                // Update the progress in KV storage
+                const currentState = { 
+                    status: 'running', 
+                    processed: processedCount, 
+                    total: totalMembers, 
+                    step: `Processing batch... (${processedCount}/${totalMembers})`
+                };
+                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
             }
+            
+            // Finalize the job
+            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'complete', processed: totalMembers, total: totalMembers, step: 'Done!' }));
         };
         
-        // This tells Cloudflare to run the function even after the response is sent
-        context.waitUntil(doIndividualDeletion());
+        context.waitUntil(doParallelDeletion());
 
-        // Immediately respond to the frontend that the job has started
-        return new Response(JSON.stringify({ success: true, message: "Deletion job started successfully." }), {
-            status: 202, // 202 Accepted
+        return new Response(JSON.stringify({ success: true, message: "Parallel deletion job started." }), {
+            status: 202,
             headers: { 'Content-Type': 'application/json' },
         });
 
     } catch (e) {
-        return new Response(JSON.stringify({ message: 'Failed to initialize deletion job.', error: e.message }), { status: 500 });
+        return new Response(JSON.stringify({ message: 'An error occurred.', error: e.message }), { status: 500 });
     }
 }
