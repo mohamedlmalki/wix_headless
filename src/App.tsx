@@ -14,13 +14,22 @@ import BulkDeletePage from './headless/pages/BulkDeletePage';
 import WebhookTestPage from "./pages/WebhookTestPage";
 import { jobManager, JobState } from './headless/lib/JobManager';
 
-// Define the project structure here to be shared across components
 export interface HeadlessProject {
     projectName: string;
     siteId: string;
     apiKey: string;
     campaigns?: { [key: string]: string; };
     webhookUrl?: string;
+}
+
+// *** ADDED: State definition for webhook jobs ***
+export interface WebhookJobState {
+    isRunning: boolean;
+    isPaused: boolean;
+    progress: number;
+    processed: number;
+    total: number;
+    results: any[];
 }
 
 const queryClient = new QueryClient();
@@ -41,11 +50,12 @@ const App = () => {
     const [jobs, setJobs] = useState<Record<string, JobState>>({});
     const [campaignStats, setCampaignStats] = useState<CampaignStatsState>(initialCampaignStatsState);
     
-    // State for projects is now managed here in the main App component
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | null>(null);
+    
+    // *** ADDED: State for webhook jobs ***
+    const [webhookJobs, setWebhookJobs] = useState<Record<string, WebhookJobState>>({});
 
-    // Fetch the projects when the application first loads
     useEffect(() => {
         const fetchProjects = async () => {
             try {
@@ -53,7 +63,6 @@ const App = () => {
                 if (response.ok) {
                     const projects = await response.json();
                     setHeadlessProjects(projects);
-                    // If no project is selected yet, select the first one
                     if (projects.length > 0 && !selectedProject) {
                         setSelectedProject(projects[0]);
                     }
@@ -63,7 +72,7 @@ const App = () => {
             }
         };
         fetchProjects();
-    }, []); // The empty array means this effect runs only once
+    }, []);
 
     useEffect(() => {
         const handleJobUpdate = (data: any) => {
@@ -89,7 +98,6 @@ const App = () => {
         setCampaignStats(prev => ({ ...prev, ...updates }));
     };
 
-    // Props to pass down to the pages that need project management
     const projectManagerProps = {
         headlessProjects,
         selectedProject,
@@ -124,7 +132,13 @@ const App = () => {
                             path="/bulk-delete"
                             element={<BulkDeletePage {...projectManagerProps} />}
                         />
-                        <Route path="/webhook-test" element={<WebhookTestPage {...projectManagerProps} />} />
+                        <Route path="/webhook-test" 
+                            element={<WebhookTestPage 
+                                {...projectManagerProps} 
+                                webhookJobs={webhookJobs}
+                                setWebhookJobs={setWebhookJobs}
+                            />} 
+                        />
                         <Route path="*" element={<NotFound />} />
                     </Routes>
                 </BrowserRouter>
