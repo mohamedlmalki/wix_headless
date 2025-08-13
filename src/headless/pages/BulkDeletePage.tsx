@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, RefreshCw, Download, ListChecks, Terminal } from "lucide-react";
+import { Trash2, RefreshCw, Download, ListChecks, Terminal, AlertTriangle } from "lucide-react";
 import Navbar from '@/components/Navbar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -26,9 +26,7 @@ interface Member {
   id: string;
   loginEmail: string;
   contactId: string;
-  profile: {
-    nickname: string;
-  };
+  profile: { nickname: string; };
   status?: string;
 }
 
@@ -57,6 +55,7 @@ const exportEmailsToTxt = (data: any[], filename: string) => {
     link.click();
     document.body.removeChild(link);
 };
+
 
 const BulkDeletePage = () => {
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
@@ -125,26 +124,34 @@ const BulkDeletePage = () => {
                 if (!response.ok) throw new Error(`Status check failed: ${response.statusText}`);
                 const data = await response.json();
 
+                const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
+                
+                // Always update progress
+                setDeleteJobState(prevState => ({
+                    ...prevState,
+                    deleteProgress: { ...prevState.deleteProgress, ...data, progress: progressValue }
+                }));
+                
+                // Add log only if step message has changed
+                if (data.step && data.step !== deleteJobState.deleteProgress.step) {
+                    addLog(data.step);
+                }
+
                 if (data.status === 'running') {
-                    if(data.step !== deleteJobState.deleteProgress.step) {
-                        addLog(data.step);
-                    }
-                    const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
-                    setDeleteJobState({
-                        isDeleteJobRunning: true,
-                        deleteProgress: { ...data, progress: progressValue }
-                    });
+                    setDeleteJobState({ isDeleteJobRunning: true, deleteProgress: { ...data, progress: progressValue }});
                 } else if (data.status === 'complete') {
                     addLog("Job completed successfully!");
-                    setDeleteJobState({
-                        isDeleteJobRunning: false,
-                        deleteProgress: { processed: data.total, total: data.total, progress: 100, step: 'Complete!' }
-                    });
-                    toast({ title: "Bulk delete complete!", description: `Successfully removed members.` });
+                    toast({ title: "Bulk delete complete!", description: `Successfully processed member deletions.` });
                     stopPolling();
+                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...data, progress: 100 }});
                     handleListAllMembers();
+                } else if (data.status === 'error') {
+                    addLog(`ERROR: ${data.step}`);
+                    toast({ title: "Job Failed", description: "The deletion job encountered an error. Check logs for details.", variant: "destructive" });
+                    stopPolling();
+                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...data, progress: progressValue }});
                 } else if (data.status === 'idle') {
-                     addLog("Job is now idle. Stopping polling.");
+                     addLog("Job is idle. Stopping polling.");
                      setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
                      stopPolling();
                 }
@@ -230,7 +237,6 @@ const BulkDeletePage = () => {
                     contactId: member.contactId,
                 }));
             
-            // Simplified total for member-only deletion
             const totalSteps = Math.ceil(membersToDelete.length / 100);
             setDeleteJobState({
                 isDeleteJobRunning: true,
@@ -279,7 +285,7 @@ const BulkDeletePage = () => {
                 isDeleteJobRunning: false,
                 deleteProgress: { processed: 0, total: 0, step: 'Job reset.', progress: 0 },
             });
-            addLog("Job status has been successfully reset. UI is unlocked.");
+            setLogs(['Job status has been successfully reset. UI is unlocked.']);
             toast({ title: "Job Reset", description: "The deletion job status has been cleared." });
 
         } catch (error) {
@@ -351,9 +357,9 @@ const BulkDeletePage = () => {
                         <Card className="bg-gradient-card shadow-card border-primary/10">
                              <CardHeader>
                                 <CardTitle>Bulk Deletion Status</CardTitle>
-                                {deleteJobState.isDeleteJobRunning && (
-                                     <CardDescription>
-                                        {deleteJobState.deleteProgress.step || 'Initializing...'}
+                                {deleteJobState.deleteProgress.step && (
+                                     <CardDescription className={deleteJobState.deleteProgress.step?.includes('failed') ? 'text-destructive' : ''}>
+                                        {deleteJobState.deleteProgress.step}
                                     </CardDescription>
                                 )}
                             </CardHeader>
