@@ -16,6 +16,7 @@ interface HeadlessProject {
   projectName: string;
   siteId: string;
   apiKey: string;
+  ownerEmail?: string; // ★★★ ADDED THIS LINE
 }
 
 interface Member {
@@ -141,7 +142,14 @@ const BulkDeletePage = () => {
             });
             if (!response.ok) throw new Error('Failed to fetch the member list.');
             const data = await response.json();
-            setAllMembers(data.members || []);
+            
+            // ★★★ ADDED FRONTEND FILTER AS A BACKUP ★★★
+            let members = data.members || [];
+            if (selectedProject.ownerEmail) {
+                members = members.filter(member => member.loginEmail.toLowerCase() !== selectedProject.ownerEmail.toLowerCase());
+            }
+            setAllMembers(members);
+
         } catch (error) {
             toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
         } finally {
