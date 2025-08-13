@@ -34,7 +34,8 @@ const exportEmailsToTxt = (data: any[], filename: string) => {
 };
 
 interface Campaign { [key: string]: string; }
-interface HeadlessProject { projectName: string; siteId: string; apiKey: string; campaigns?: Campaign; }
+// *** UPDATED: Added webhookUrl to the project interface ***
+interface HeadlessProject { projectName: string; siteId: string; apiKey: string; campaigns?: Campaign; webhookUrl?: string; }
 interface Member { id: string; loginEmail: string; contactId: string; profile: { nickname: string; }; status?: string; }
 interface SenderDetails { fromName: string; fromEmail: string; }
 type CampaignField = { id: number; key: string; value: string; };
@@ -59,6 +60,8 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
     const [projectName, setProjectName] = useState("");
     const [siteId, setSiteId] = useState("");
     const [apiKey, setApiKey] = useState("");
+    // *** ADDED: State for the webhook URL ***
+    const [webhookUrl, setWebhookUrl] = useState("");
     const [originalSiteId, setOriginalSiteId] = useState("");
     const [campaignFields, setCampaignFields] = useState<CampaignField[]>([{ id: 1, key: '', value: '' }]);
     const [isAllMembersDialogOpen, setAllMembersDialogOpen] = useState(false);
@@ -169,6 +172,8 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
             setSiteId(selectedProject.siteId);
             setOriginalSiteId(selectedProject.siteId);
             setApiKey(selectedProject.apiKey);
+            // *** ADDED: Set webhookUrl in edit mode ***
+            setWebhookUrl(selectedProject.webhookUrl || "");
             const campaignsArray = selectedProject.campaigns ? 
                 Object.entries(selectedProject.campaigns).map(([key, value], index) => ({ id: index, key, value })) 
                 : [];
@@ -177,6 +182,7 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
             setProjectName("");
             setSiteId("");
             setApiKey("");
+            setWebhookUrl(""); // *** ADDED: Reset webhookUrl in add mode ***
             setCampaignFields([{ id: 0, key: '', value: '' }]);
             setOriginalSiteId("");
         }
@@ -200,6 +206,7 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
             projectName,
             siteId,
             apiKey,
+            webhookUrl, // *** ADDED: Include webhookUrl in project data ***
             campaigns: campaignsObject
         };
 
@@ -605,6 +612,8 @@ export function HeadlessImportPage({ jobs, onJobStateChange: handleJobStateChang
                                 <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="projectName" className="text-right">Project Name</Label><Input id="projectName" value={projectName} onChange={(e) => setProjectName(e.target.value)} className="col-span-3" /></div>
                                 <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="siteId" className="text-right">Site ID</Label><Input id="siteId" value={siteId} onChange={(e) => setSiteId(e.target.value)} className="col-span-3" /></div>
                                 <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="apiKey" className="text-right">API Key</Label><Input id="apiKey" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="col-span-3" /></div>
+                                {/* *** ADDED: Webhook URL input field *** */}
+                                <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="webhookUrl" className="text-right">Webhook URL</Label><Input id="webhookUrl" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} className="col-span-3" /></div>
                                 <div className="grid grid-cols-4 items-start gap-4">
                                     <Label className="text-right pt-2">Campaigns</Label>
                                     <div className="col-span-3 space-y-2">

@@ -2,18 +2,19 @@
 
 export async function onRequestPost({ request }) {
   try {
-    // The specific webhook URL provided by the user.
-    const wixWebhookUrl = 'https://manage.wix.com/_api/webhook-trigger/report/f1cf47f9-8600-417d-b32f-8103b0bdcbbc/fe35eb93-d982-49b0-a093-f71d7cd74321';
+    // *** UPDATED: Get the webhook URL dynamically from the request body ***
+    const { webhookUrl, email_field, subject_field, content_field } = await request.json();
 
-    // Get the data from the frontend form.
-    const { email_field, subject_field, content_field } = await request.json();
+    if (!webhookUrl) {
+      return new Response(JSON.stringify({ message: 'Webhook URL is required.' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-    // Construct the payload to send to Wix.
-    // We'll use the fields from the form and add some static example data
-    // to match the structure the user provided.
     const payload = {
       string_field: subject_field,
-      uuid_field: crypto.randomUUID(), // Generate a random UUID
+      uuid_field: crypto.randomUUID(),
       number_field: 42,
       dateTime_field: new Date().toISOString(),
       date_field: new Date().toISOString().split('T')[0],
@@ -31,8 +32,7 @@ export async function onRequestPost({ request }) {
       ]
     };
 
-    // Send the data to the Wix webhook URL.
-    const wixResponse = await fetch(wixWebhookUrl, {
+    const wixResponse = await fetch(webhookUrl, { // *** UPDATED: Use the dynamic URL ***
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -40,18 +40,14 @@ export async function onRequestPost({ request }) {
       body: JSON.stringify(payload),
     });
     
-    // Read the response from Wix. It might be empty on success.
     const responseText = await wixResponse.text();
 
-    // Return a success response to the frontend.
-    // We use wixResponse.status to pass through the status from Wix.
     return new Response(responseText || 'Webhook received successfully by Wix.', {
       status: wixResponse.status,
       headers: { 'Content-Type': 'text/plain' },
     });
 
   } catch (e) {
-    // If an error occurs, send back an error response.
     return new Response(JSON.stringify({ message: 'An error occurred.', error: e.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
