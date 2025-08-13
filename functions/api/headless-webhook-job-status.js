@@ -1,13 +1,28 @@
+// functions/api/headless-webhook-job-status.js
+
 export async function onRequestPost({ request, env }) {
-    try {
-        const { siteId, action } = await request.json();
-        const controlKey = `webhook_control_${siteId}`;
+  try {
+    const { siteId } = await request.json();
+    const jobKey = `webhook_job_${siteId}`;
 
-        // This function's only job is to set the command.
-        await env.WIX_HEADLESS_CONFIG.put(controlKey, action);
+    const statusJson = await env.WIX_HEADLESS_CONFIG.get(jobKey);
 
-        return new Response(JSON.stringify({ success: true, message: `Command '${action}' sent.` }), { status: 200 });
-    } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+    if (!statusJson) {
+      return new Response(JSON.stringify({ status: 'idle' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
+
+    return new Response(statusJson, {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  } catch (e) {
+    return new Response(JSON.stringify({ message: 'An error occurred.', error: e.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 }
