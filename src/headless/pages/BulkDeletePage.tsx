@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -16,7 +16,7 @@ interface HeadlessProject {
   projectName: string;
   siteId: string;
   apiKey: string;
-  ownerEmail?: string;
+  ownerEmail?: string; // ★★★ ADDED THIS LINE
 }
 
 interface Member {
@@ -39,6 +39,26 @@ export interface DeleteJobState {
     };
 }
 
+const exportEmailsToTxt = (data: any[], filename: string) => {
+    const emails = data.map(row => row.loginEmail).filter(Boolean);
+    if (emails.length === 0) {
+        alert("No emails to export.");
+        return;
+    }
+    const txtContent = emails.join('\n');
+    const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `${filename}.txt`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+};
+
 const BulkDeletePage = () => {
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | null>(null);
@@ -51,41 +71,6 @@ const BulkDeletePage = () => {
         deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
     });
     const { toast } = useToast();
-
-    const checkJobStatus = useCallback(async () => {
-        if (!selectedProject) return;
-        try {
-            const response = await fetch('/api/headless-job-status', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId }),
-            });
-            const data = await response.json();
-
-            if (data.status === 'stuck') {
-                setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
-                toast({ title: "Deletion Job Failed", description: data.error, variant: "destructive", duration: 10000 });
-            } else if (data.status === 'running') {
-                const progressValue = (data.processed / data.total) * 100;
-                setDeleteJobState({ 
-                    isDeleteJobRunning: true,
-                    deleteProgress: { processed: data.processed, total: data.total, step: data.step, progress: progressValue } 
-                });
-            } else if (data.status === 'complete') {
-                setDeleteJobState({ 
-                    isDeleteJobRunning: false, 
-                    deleteProgress: { processed: data.total, total: data.total, progress: 100, step: 'Complete!' } 
-                });
-                toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
-                handleListAllMembers(); // Refresh the list
-            } else if (data.status === 'idle') {
-                setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
-            }
-        } catch (error) {
-            console.error("Failed to fetch delete job status:", error);
-            setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
-        }
-    }, [selectedProject, toast]);
 
     useEffect(() => {
         const fetchProjects = async () => {
@@ -106,17 +91,43 @@ const BulkDeletePage = () => {
     }, [toast]);
 
     useEffect(() => {
-        if (selectedProject) {
-            checkJobStatus();
-        }
-    }, [selectedProject, checkJobStatus]);
+        if (!deleteJobState.isDeleteJobRunning || !selectedProject) return;
 
-    useEffect(() => {
-        if (!deleteJobState.isDeleteJobRunning) return;
+        const intervalId = setInterval(async () => {
+            try {
+                const response = await fetch('/api/headless-job-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ siteId: selectedProject.siteId }),
+                });
+                const data = await response.json();
 
-        const intervalId = setInterval(checkJobStatus, 3000);
+                if (data.status === 'stuck') {
+                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
+                    toast({ title: "Deletion Job Failed", description: data.error, variant: "destructive", duration: 10000 });
+                } else if (data.status === 'running') {
+                    const progressValue = (data.processed / data.total) * 100;
+                    setDeleteJobState({ 
+                        isDeleteJobRunning: true,
+                        deleteProgress: { processed: data.processed, total: data.total, step: data.step, progress: progressValue } 
+                    });
+                } else if (data.status === 'complete') {
+                    setDeleteJobState({ 
+                        isDeleteJobRunning: false, 
+                        deleteProgress: { processed: data.total, total: data.total, progress: 100 } 
+                    });
+                    toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
+                } else if (data.status === 'idle') {
+                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
+                }
+            } catch (error) {
+                console.error("Failed to fetch delete job status:", error);
+                setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
+            }
+        }, 2500);
+
         return () => clearInterval(intervalId);
-    }, [deleteJobState.isDeleteJobRunning, checkJobStatus]);
+    }, [deleteJobState, selectedProject, toast]);
 
     const handleListAllMembers = async () => {
         if (!selectedProject) return;
@@ -132,6 +143,7 @@ const BulkDeletePage = () => {
             if (!response.ok) throw new Error('Failed to fetch the member list.');
             const data = await response.json();
             
+            // ★★★ ADDED FRONTEND FILTER AS A BACKUP ★★★
             let members = data.members || [];
             if (selectedProject.ownerEmail) {
                 members = members.filter(member => member.loginEmail.toLowerCase() !== selectedProject.ownerEmail.toLowerCase());
@@ -153,7 +165,7 @@ const BulkDeletePage = () => {
         
         setDeleteJobState({
             isDeleteJobRunning: true,
-            deleteProgress: { processed: 0, total: 1, step: 'Initializing job...', progress: 0 },
+            deleteProgress: { processed: 0, total: 2, step: 'Starting job...', progress: 0 },
         });
 
         try {
@@ -177,6 +189,8 @@ const BulkDeletePage = () => {
             }
 
             toast({ title: "Deletion Job Started", description: "The process is running in the background." });
+
+            setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
             setSelectedAllMembers([]);
 
         } catch (error: any) {
@@ -227,7 +241,7 @@ const BulkDeletePage = () => {
                                     ))}
                                 </SelectContent>
                             </Select>
-                            <Button onClick={handleListAllMembers} disabled={!selectedProject || isFetchingAllMembers || deleteJobState.isDeleteJobRunning}>
+                            <Button onClick={handleListAllMembers} disabled={!selectedProject || isFetchingAllMembers}>
                                 <ListChecks className="mr-2 h-4 w-4" />
                                 {isFetchingAllMembers ? 'Loading...' : 'Load All Members'}
                             </Button>
@@ -257,6 +271,7 @@ const BulkDeletePage = () => {
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <Input placeholder="Filter results..." value={allMembersFilterQuery} onChange={(e) => setAllMembersFilterQuery(e.target.value)} className="w-40 h-8" />
+                                    <Button variant="outline" size="sm" onClick={() => exportEmailsToTxt(filteredAllMembers, 'all-members-emails')}><Download className="mr-2 h-4 w-4"/>Export Emails</Button>
                                 </div>
                             </CardHeader>
                             <CardContent>
