@@ -1,16 +1,5 @@
 // functions/api/headless-start-delete-job.js
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Helper to chunk an array into smaller arrays of a specific size
-function chunkArray(array, size) {
-  const chunks = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-}
-
 // Helper to get detailed error messages from the Wix API response
 async function getErrorDetails(response) {
     const errorText = await response.text();
@@ -19,6 +8,38 @@ async function getErrorDetails(response) {
         return parsed.message || JSON.stringify(parsed);
     } catch (e) {
         return errorText || "No additional error details were provided by the API.";
+    }
+}
+
+// Function to delete a single member and then their contact
+async function deleteSingleMemberAndContact(member, project) {
+    try {
+        // Step 1: Delete the Member
+        const memberDeleteRes = await fetch(`https://www.wixapis.com/members/v1/members/${member.memberId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
+        });
+
+        // A 404 error means it's already deleted, which is a success in this context
+        if (!memberDeleteRes.ok && memberDeleteRes.status !== 404) {
+            const errorDetails = await getErrorDetails(memberDeleteRes);
+            throw new Error(`Failed to delete member ${member.memberId}: ${errorDetails}`);
+        }
+
+        // Step 2: Delete the associated Contact
+        const contactDeleteRes = await fetch(`https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
+        });
+
+        if (!contactDeleteRes.ok && contactDeleteRes.status !== 404) {
+            // Log this error but don't stop the whole job, as the member is deleted.
+            console.error(`Post-member deletion warning: Could not delete contact ${member.contactId}.`);
+        }
+    } catch (error) {
+        console.error(`Error processing member ${member.memberId}:`, error);
+        // Re-throw the error so Promise.allSettled can catch it as 'rejected'
+        throw error;
     }
 }
 
@@ -31,74 +52,54 @@ export async function onRequestPost(context) {
         const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
         if (!projectsJson) throw new Error("Could not retrieve project configurations.");
         
-        const project = projectsJson.find(p => p.siteId === siteId);
+        const project = projects.find(p => p.siteId === siteId);
         if (!project) return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
 
-        const doBulkDeletion = async () => {
-            let currentState = {};
+        const doParallelDeletion = async () => {
             const totalMembers = membersToDelete.length;
-            
-            // Chunk all members into batches of 100
-            const memberChunks = chunkArray(membersToDelete, 100);
-            const totalSteps = memberChunks.length * 2; // Each chunk has two steps: delete members, then delete contacts
-            let stepsCompleted = 0;
+            let processedCount = 0;
+            let failureCount = 0;
 
-            for (const chunk of memberChunks) {
-                const memberIdsInChunk = chunk.map(m => m.memberId);
-                const contactIdsInChunk = chunk.map(m => m.contactId);
+            // Process in parallel batches of 100 to maximize speed
+            const batchSize = 100;
 
-                // --- STEP 1: Bulk Delete a batch of 100 Members ---
-                stepsCompleted++;
-                currentState = { status: 'running', processed: stepsCompleted, total: totalSteps, step: `Deleting member batch...` };
-                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
-
-                const memberDeleteRes = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
-                    method: 'POST',
-                    headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ "memberIds": memberIdsInChunk })
-                });
-
-                if (!memberDeleteRes.ok) {
-                    const errorDetails = await getErrorDetails(memberDeleteRes);
-                    throw new Error(`Failed on member batch. Status: ${memberDeleteRes.status}: ${errorDetails}`);
-                }
-
-                // --- Wait for 1 second as requested ---
-                await delay(1000);
-
-                // --- STEP 2: Bulk Delete the corresponding Contacts for that batch ---
-                stepsCompleted++;
-                currentState = { status: 'running', processed: stepsCompleted, total: totalSteps, step: `Deleting contact batch...` };
-                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
+            for (let i = 0; i < totalMembers; i += batchSize) {
+                const batch = membersToDelete.slice(i, i + batchSize);
                 
-                const contactDeleteRes = await fetch('https://www.wixapis.com/contacts/v4/bulk/contacts/delete', {
-                    method: 'POST',
-                    headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filter: { "_id": { "$in": contactIdsInChunk } } })
-                });
+                const deletePromises = batch.map(member => deleteSingleMemberAndContact(member, project));
 
-                if (!contactDeleteRes.ok) {
-                    const errorDetails = await getErrorDetails(contactDeleteRes);
-                    // Log the error but continue, as members might be deleted.
-                    console.error(`Failed to start contact deletion job for batch: ${errorDetails}`);
-                }
+                // Promise.allSettled will wait for all promises to finish, regardless of success or failure
+                const results = await Promise.allSettled(deletePromises);
+                
+                // Count failures in this batch for logging
+                failureCount += results.filter(r => r.status === 'rejected').length;
+                processedCount += batch.length;
+                
+                // Update the progress in KV storage
+                const currentState = { 
+                    status: 'running', 
+                    processed: processedCount, 
+                    total: totalMembers, 
+                    step: `Processing... (${processedCount}/${totalMembers})`
+                };
+                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentState));
             }
-
-            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'complete', processed: totalSteps, total: totalSteps, step: 'Done!' }));
-
+            
+            // Finalize the job
+            const finalMessage = failureCount > 0 
+                ? `Done, with ${failureCount} errors. Check function logs for details.` 
+                : 'Done!';
+            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({ status: 'complete', processed: totalMembers, total: totalMembers, step: finalMessage }));
         };
         
-        context.waitUntil(doBulkDeletion());
+        context.waitUntil(doParallelDeletion());
 
-        return new Response(JSON.stringify({ success: true, message: "Bulk deletion job started." }), {
+        return new Response(JSON.stringify({ success: true, message: "Parallel deletion job started." }), {
             status: 202,
             headers: { 'Content-Type': 'application/json' },
         });
 
     } catch (e) {
-        return new Response(JSON.stringify({ message: 'An error occurred during job initialization.', error: e.message }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        return new Response(JSON.stringify({ message: 'An error occurred.', error: e.message }), { status: 500 });
     }
 }
