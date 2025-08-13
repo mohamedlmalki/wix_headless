@@ -9,7 +9,8 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import { HeadlessImportPage } from './headless/pages/HeadlessImportPage';
 import CampaignStatsPage, { CampaignStatsState } from './headless/pages/CampaignStatsPage';
-import { jobManager, JobState, UpdatePayload } from './headless/lib/JobManager';
+import BulkDeletePage from './headless/pages/BulkDeletePage';
+import { jobManager, JobState } from './headless/lib/JobManager';
 
 const queryClient = new QueryClient();
 
@@ -24,26 +25,12 @@ const initialCampaignStatsState: CampaignStatsState = {
     recipients: [], summaryStats: null,
 };
 
-// ★★★ NEW: Define the shape of the deletion job state ★★★
-export interface DeleteJobState {
-    isDeleteJobRunning: boolean;
-    deleteProgress: { processed: number; total: number };
-}
-
 const App = () => {
-    // State for the Import page jobs
     const [jobs, setJobs] = useState<Record<string, JobState>>({});
-    // State for the Campaign Statistics page
     const [campaignStats, setCampaignStats] = useState<CampaignStatsState>(initialCampaignStatsState);
-    // ★★★ NEW: State for the Deletion job progress ★★★
-    const [deleteJobState, setDeleteJobState] = useState<DeleteJobState>({
-        isDeleteJobRunning: false,
-        deleteProgress: { processed: 0, total: 0 },
-    });
-
 
     useEffect(() => {
-        const handleJobUpdate = (data: UpdatePayload) => {
+        const handleJobUpdate = (data: any) => {
             setJobs(prev => ({
                 ...prev,
                 [data.siteId]: { ...(prev[data.siteId] || initialJobState), ...data.payload }
@@ -66,11 +53,6 @@ const App = () => {
         setCampaignStats(prev => ({ ...prev, ...updates }));
     };
 
-    // ★★★ NEW: Handler to update the Deletion job state ★★★
-    const handleDeleteJobStateChange = (updates: Partial<DeleteJobState>) => {
-        setDeleteJobState(prev => ({ ...prev, ...updates }));
-    };
-
     return (
         <QueryClientProvider client={queryClient}>
             <TooltipProvider>
@@ -79,19 +61,20 @@ const App = () => {
                 <BrowserRouter>
                     <Routes>
                         <Route path="/" element={<Index />} />
-                        {/* ★★★ UPDATE: Pass the delete job state and handler down ★★★ */}
                         <Route
                             path="/headless-import"
                             element={<HeadlessImportPage 
                                 jobs={jobs} 
                                 onJobStateChange={handleJobStateChange}
-                                deleteJobState={deleteJobState}
-                                onDeleteJobStateChange={handleDeleteJobStateChange}
                             />}
                         />
                         <Route
                             path="/campaign-stats"
                             element={<CampaignStatsPage statsState={campaignStats} onStatsStateChange={handleCampaignStatsChange} />}
+                        />
+                        <Route
+                            path="/bulk-delete"
+                            element={<BulkDeletePage />}
                         />
                         <Route path="*" element={<NotFound />} />
                     </Routes>
