@@ -90,6 +90,30 @@ const BulkDeletePage = () => {
     }, [toast]);
 
     useEffect(() => {
+        if (!selectedProject) return;
+
+        // Check for an ongoing job when the project changes
+        const checkInitialJobStatus = async () => {
+            try {
+                const response = await fetch('/api/headless-job-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ siteId: selectedProject.siteId }),
+                });
+                const data = await response.json();
+                if (data.status === 'running') {
+                    setDeleteJobState({ isDeleteJobRunning: true, deleteProgress: data });
+                }
+            } catch (error) {
+                console.error("Could not check initial job status:", error);
+            }
+        };
+
+        checkInitialJobStatus();
+    }, [selectedProject]);
+
+
+    useEffect(() => {
         if (!deleteJobState.isDeleteJobRunning || !selectedProject) return;
 
         const intervalId = setInterval(async () => {
@@ -99,13 +123,16 @@ const BulkDeletePage = () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ siteId: selectedProject.siteId }),
                 });
+
+                if (!response.ok) {
+                    // Stop polling if the status endpoint fails
+                    throw new Error(`Status check failed: ${response.statusText}`);
+                }
+
                 const data = await response.json();
 
-                if (data.status === 'stuck') {
-                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
-                    toast({ title: "Deletion Job Failed", description: data.error, variant: "destructive", duration: 10000 });
-                } else if (data.status === 'running') {
-                    const progressValue = (data.processed / data.total) * 100;
+                if (data.status === 'running') {
+                    const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
                     setDeleteJobState({
                         isDeleteJobRunning: true,
                         deleteProgress: { processed: data.processed, total: data.total, step: data.step, progress: progressValue }
@@ -113,20 +140,23 @@ const BulkDeletePage = () => {
                 } else if (data.status === 'complete') {
                     setDeleteJobState({
                         isDeleteJobRunning: false,
-                        deleteProgress: { processed: data.total, total: data.total, progress: 100 }
+                        deleteProgress: { processed: data.total, total: data.total, progress: 100, step: 'Complete!' }
                     });
                     toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
+                    clearInterval(intervalId); // Stop polling on completion
                 } else if (data.status === 'idle') {
-                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
+                     setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
+                     clearInterval(intervalId); // Stop polling if job is no longer found
                 }
             } catch (error) {
                 console.error("Failed to fetch delete job status:", error);
-                setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
+                toast({ title: "Polling Error", description: "Could not get job status. It may have failed. Try resetting the job.", variant: "destructive" });
+                clearInterval(intervalId); // Stop polling on error
             }
         }, 2500);
 
         return () => clearInterval(intervalId);
-    }, [deleteJobState, selectedProject, toast]);
+    }, [deleteJobState.isDeleteJobRunning, selectedProject, toast]);
 
     const handleListAllMembers = async () => {
         if (!selectedProject) return;
@@ -157,7 +187,7 @@ const BulkDeletePage = () => {
 
         setDeleteJobState({
             isDeleteJobRunning: true,
-            deleteProgress: { processed: 0, total: 2, step: 'Starting job...', progress: 0 },
+            deleteProgress: { processed: 0, total: selectedAllMembers.length * 2, step: 'Initializing job...', progress: 0 },
         });
 
         try {
@@ -166,7 +196,6 @@ const BulkDeletePage = () => {
                 .map(member => ({
                     memberId: member.id,
                     contactId: member.contactId,
-                    emailAddress: member.loginEmail
                 }));
 
             const response = await fetch('/api/headless-start-delete-job', {
@@ -176,8 +205,19 @@ const BulkDeletePage = () => {
             });
 
             if (!response.ok) {
-                const data = await response.json();
-                throw new Error(data.message || 'Failed to start deletion job.');
+                let errorMessage = `Failed to start job with status: ${response.status}`;
+                try {
+                    const data = await response.json();
+                    errorMessage = data.message || JSON.stringify(data);
+                } catch (e) {
+                    const textResponse = await response.text();
+                    if (textResponse) {
+                        errorMessage += `\nServer response: ${textResponse}`;
+                    } else {
+                        errorMessage += "\nServer returned an empty error response.";
+                    }
+                }
+                throw new Error(errorMessage);
             }
 
             toast({ title: "Deletion Job Started", description: "The process is running in the background." });
@@ -187,7 +227,7 @@ const BulkDeletePage = () => {
 
         } catch (error: any) {
             toast({ title: "Error Starting Job", description: error.message, variant: "destructive" });
-            setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
+            setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: 'Failed to start', progress: 0 } });
         }
     };
 
@@ -263,7 +303,7 @@ const BulkDeletePage = () => {
                             <CardHeader>
                                 <CardTitle>Bulk Deletion in Progress</CardTitle>
                                 <CardDescription>
-                                    Step {deleteJobState.deleteProgress.processed} of {deleteJobState.deleteProgress.total}: {deleteJobState.deleteProgress.step || 'Initializing...'}
+                                    {deleteJobState.deleteProgress.step || 'Initializing...'}
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
