@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { HeadlessProject } from '@/App'; // Import the shared interface from App.tsx
+import { Badge } from "@/components/ui/badge";
 
 // Interface for campaign fields in the dialog
 type CampaignField = { id: number; key: string; value: string; };
@@ -32,7 +33,7 @@ const WebhookTestPage = ({
     const { toast } = useToast();
     
     // State for the webhook form itself
-    const [email, setEmail] = useState('');
+    const [emails, setEmails] = useState('');
     const [subject, setSubject] = useState('');
     const [content, setContent] = useState('');
     const [isSending, setIsSending] = useState(false);
@@ -138,31 +139,41 @@ const WebhookTestPage = ({
             toast({ title: "Webhook URL Missing", description: "Please edit the selected project to add a webhook URL.", variant: "destructive" });
             return;
         }
-        if (!email || !subject || !content) {
-            toast({ title: "Missing Fields", description: "Please fill out all the fields.", variant: "destructive" });
+        const emailList = emails.split(/[,\s\n]+/).filter(e => e.trim().includes('@'));
+        if (emailList.length === 0 || !subject || !content) {
+            toast({ title: "Missing Fields", description: "Please provide at least one email, a subject, and content.", variant: "destructive" });
             return;
         }
         setIsSending(true);
         setResponse('');
         try {
-            const res = await fetch('/api/headless-send-webhook', {
+            const res = await fetch('/api/headless-send-bulk-webhook', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ webhookUrl: selectedProject.webhookUrl, email_field: email, subject_field: subject, content_field: content }),
+                body: JSON.stringify({ 
+                    webhookUrl: selectedProject.webhookUrl, 
+                    emails: emailList, 
+                    subject, 
+                    content 
+                }),
             });
-            const responseData = await res.text();
-            if (!res.ok) throw new Error(`Webhook failed with status ${res.status}: ${responseData}`);
-            setResponse(`Status: ${res.status}\nResponse Body:\n${responseData}`);
-            toast({ title: "Webhook Sent!", description: "Data sent successfully." });
-            setEmail(''); setSubject(''); setContent('');
+            const responseData = await res.json();
+            if (!res.ok) throw new Error(`Webhook failed: ${responseData.message || 'Unknown error'}`);
+            
+            setResponse(`Successfully sent to ${responseData.successCount} emails.\nFailed to send to ${responseData.failureCount} emails.\n\nSee console for detailed logs.`);
+            console.log("Webhook Results:", responseData.results);
+            toast({ title: "Webhook Batch Sent!", description: `Processed ${emailList.length} emails.` });
+            setEmails(''); setSubject(''); setContent('');
         } catch (error) {
             const errorMessage = (error as Error).message;
             setResponse(`Error:\n${errorMessage}`);
-            toast({ title: "Error Sending Webhook", description: errorMessage, variant: "destructive" });
+            toast({ title: "Error Sending Webhooks", description: errorMessage, variant: "destructive" });
         } finally {
             setIsSending(false);
         }
     };
+
+    const emailCount = emails.split(/[,\s\n]+/).filter(e => e.trim().includes('@')).length;
 
     return (
         <div className="min-h-screen bg-gradient-subtle">
@@ -172,8 +183,8 @@ const WebhookTestPage = ({
                     <div className="flex items-center gap-4">
                         <Webhook className="h-10 w-10 text-primary" />
                         <div>
-                            <h1 className="text-3xl font-bold">Webhook Tester</h1>
-                            <p className="text-muted-foreground">Send a test payload to your Wix webhook endpoint.</p>
+                            <h1 className="text-3xl font-bold">Bulk Webhook Sender</h1>
+                            <p className="text-muted-foreground">Send a custom payload to multiple emails via a Wix webhook.</p>
                         </div>
                     </div>
 
@@ -190,8 +201,8 @@ const WebhookTestPage = ({
                                     </AlertDialogTrigger>
                                     <AlertDialogContent>
                                         <AlertDialogHeader>
-                                            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                            <AlertDialogDescription>This action will permanently delete the project "{selectedProject?.projectName}".</AlertDialogDescription>
+                                            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                            <AlertDialogDescription>This will permanently delete "{selectedProject?.projectName}".</AlertDialogDescription>
                                         </AlertDialogHeader>
                                         <AlertDialogFooter>
                                             <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -242,25 +253,30 @@ const WebhookTestPage = ({
 
                     <Card className="bg-gradient-card shadow-card border-primary/10">
                         <CardHeader>
-                            <CardTitle>Send Data</CardTitle>
-                            <CardDescription>Fill in the details below to send a test request to the selected project's webhook.</CardDescription>
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <CardTitle>Create Payload</CardTitle>
+                                    <CardDescription>Enter the emails and content to send.</CardDescription>
+                                </div>
+                                <Badge variant="secondary">{emailCount} email(s)</Badge>
+                            </div>
                         </CardHeader>
                         <CardContent className="space-y-4">
                             <div className="space-y-2">
-                                <Label htmlFor="email">Email</Label>
-                                <Input id="email" type="email" placeholder="email@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+                                <Label htmlFor="emails">Emails</Label>
+                                <Textarea id="emails" placeholder="user1@example.com, user2@example.com" className="h-24" value={emails} onChange={(e) => setEmails(e.target.value)} />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="subject">Subject</Label>
                                 <Input id="subject" placeholder="Your test subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor="content">Content</Label>
-                                <Textarea id="content" placeholder="Type your message here." className="h-32" value={content} onChange={(e) => setContent(e.target.value)} />
+                                <Label htmlFor="content">Content (can be HTML)</Label>
+                                <Textarea id="content" placeholder="<h1>Hello!</h1><p>This is a test.</p>" className="h-32" value={content} onChange={(e) => setContent(e.target.value)} />
                             </div>
                             <Button onClick={handleSubmit} disabled={isSending || !selectedProject}>
                                 {isSending ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                {isSending ? 'Sending...' : 'Send to Webhook'}
+                                {isSending ? `Sending... (${emailCount})` : `Send to ${emailCount} Emails`}
                             </Button>
                         </CardContent>
                     </Card>
