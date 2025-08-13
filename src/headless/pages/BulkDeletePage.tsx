@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Label } from "@/components/ui/label"; // <-- This was the missing import
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, RefreshCw, Download, ListChecks, Terminal, AlertCircle } from "lucide-react";
+import { Trash2, RefreshCw, Download, ListChecks, Terminal } from "lucide-react";
 import Navbar from '@/components/Navbar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -72,7 +71,6 @@ const BulkDeletePage = () => {
         isDeleteJobRunning: false,
         deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
     });
-    const [staleJobDetected, setStaleJobDetected] = useState(false);
     const [logs, setLogs] = useState<string[]>([]);
     const { toast } = useToast();
     const pollingIntervalRef = useRef<number | null>(null);
@@ -101,11 +99,12 @@ const BulkDeletePage = () => {
                     }
                 }
             } catch (error) {
+                addLog(`Error loading projects: ${(error as Error).message}`);
                 toast({ title: "Error", description: "Could not load projects.", variant: "destructive" });
             }
         };
         fetchProjects();
-    }, []);
+    }, [toast]);
 
     const stopPolling = () => {
         if (pollingIntervalRef.current) {
@@ -133,22 +132,30 @@ const BulkDeletePage = () => {
                 const data = await response.json();
 
                 if (data.status === 'running') {
-                    if(data.step !== deleteJobState.deleteProgress.step) addLog(data.step);
+                    if(data.step !== deleteJobState.deleteProgress.step) {
+                        addLog(data.step);
+                    }
                     const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
-                    setDeleteJobState({ isDeleteJobRunning: true, deleteProgress: { ...data, progress: progressValue } });
+                    setDeleteJobState({
+                        isDeleteJobRunning: true,
+                        deleteProgress: { ...data, progress: progressValue }
+                    });
                 } else if (data.status === 'complete') {
                     addLog("Job completed successfully!");
-                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: data.total, total: data.total, progress: 100, step: 'Complete!' }});
+                    setDeleteJobState({
+                        isDeleteJobRunning: false,
+                        deleteProgress: { processed: data.total, total: data.total, progress: 100, step: 'Complete!' }
+                    });
                     toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
                     stopPolling();
                 } else if (data.status === 'idle') {
                      addLog("Job is now idle. Stopping polling.");
-                     setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 }});
+                     setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
                      stopPolling();
                 }
             } catch (error) {
                 addLog(`Polling error: ${(error as Error).message}`);
-                toast({ title: "Polling Error", description: "Could not get job status.", variant: "destructive" });
+                toast({ title: "Polling Error", description: "Could not get job status. Try resetting the job.", variant: "destructive" });
                 stopPolling();
             }
         }, 2500);
@@ -165,6 +172,8 @@ const BulkDeletePage = () => {
     
     useEffect(() => {
         if (!selectedProject?.siteId) return;
+        setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
+        setLogs([]);
         const checkInitialJobStatus = async () => {
             try {
                 const response = await fetch('/api/headless-job-status', {
@@ -174,8 +183,8 @@ const BulkDeletePage = () => {
                 });
                 const data = await response.json();
                 if (data.status === 'running') {
-                    setStaleJobDetected(true);
-                    addLog("Warning: A previous job was found in a running state.");
+                    addLog("Found a job already in progress...");
+                    setDeleteJobState({ isDeleteJobRunning: true, deleteProgress: data });
                 }
             } catch (error) {
                 console.error("Could not check initial job status:", error);
@@ -217,7 +226,10 @@ const BulkDeletePage = () => {
         try {
             const membersToDelete = allMembers
                 .filter(member => selectedAllMembers.includes(member.id))
-                .map(member => ({ memberId: member.id, contactId: member.contactId }));
+                .map(member => ({
+                    memberId: member.id,
+                    contactId: member.contactId,
+                }));
 
             setDeleteJobState({
                 isDeleteJobRunning: true,
@@ -232,8 +244,12 @@ const BulkDeletePage = () => {
 
             if (!response.ok) {
                 let errorMessage = `Failed to start job (Status: ${response.status})`;
-                try { const data = await response.json(); errorMessage = data.message || JSON.stringify(data); }
-                catch (e) { errorMessage = "Server returned a non-JSON error response."; }
+                try {
+                    const data = await response.json();
+                    errorMessage = data.message || JSON.stringify(data);
+                } catch (e) {
+                     errorMessage = "Failed to start job. The server returned a non-JSON response.";
+                }
                 throw new Error(errorMessage);
             }
 
@@ -259,8 +275,10 @@ const BulkDeletePage = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ siteId: selectedProject.siteId }),
             });
-            setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 }});
-            setStaleJobDetected(false); // Clear the warning
+            setDeleteJobState({
+                isDeleteJobRunning: false,
+                deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
+            });
             addLog("Job status has been successfully reset.");
             toast({ title: "Job Reset", description: "The deletion job status has been cleared." });
         } catch (error) {
@@ -276,8 +294,10 @@ const BulkDeletePage = () => {
         setSelectedAllMembers([]);
         setAllMembersFilterQuery("");
         setLogs([]);
-        setStaleJobDetected(false);
-        setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 }});
+        setDeleteJobState({
+            isDeleteJobRunning: false,
+            deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
+        });
     };
 
     const filteredAllMembers = allMembers.filter(member =>
@@ -299,12 +319,20 @@ const BulkDeletePage = () => {
                     </div>
 
                     <Card className="bg-gradient-card shadow-card border-primary/10">
-                        <CardHeader><CardTitle>Select Project</CardTitle></CardHeader>
+                        <CardHeader>
+                            <CardTitle>Select Project</CardTitle>
+                        </CardHeader>
                         <CardContent className="flex gap-4">
                             <Select onValueChange={handleProjectChange} value={selectedProject?.siteId || ""}>
-                                <SelectTrigger><SelectValue placeholder="Select a project..." /></SelectTrigger>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select a project..." />
+                                </SelectTrigger>
                                 <SelectContent>
-                                    {headlessProjects.map(project => ( <SelectItem key={project.siteId} value={project.siteId}> {project.projectName} </SelectItem> ))}
+                                    {headlessProjects.map(project => (
+                                        <SelectItem key={project.siteId} value={project.siteId}>
+                                            {project.projectName}
+                                        </SelectItem>
+                                    ))}
                                 </SelectContent>
                             </Select>
                             <Button onClick={handleListAllMembers} disabled={!selectedProject || isFetchingAllMembers}>
@@ -314,33 +342,29 @@ const BulkDeletePage = () => {
                         </CardContent>
                     </Card>
 
-                    {staleJobDetected && !deleteJobState.isDeleteJobRunning && (
-                        <Alert variant="destructive">
-                            <AlertCircle className="h-4 w-4" />
-                            <AlertTitle>Stuck Job Detected</AlertTitle>
-                            <AlertDescription className="flex items-center justify-between">
-                                A previous job did not finish. Please reset it before starting a new one.
-                                <Button onClick={handleResetJob} variant="outline" size="sm" className="ml-4 bg-white text-destructive hover:bg-white/90">
-                                    <RefreshCw className="mr-2 h-4 w-4" />
-                                    Reset Job
-                                </Button>
-                            </AlertDescription>
-                        </Alert>
-                    )}
-
                     {(deleteJobState.isDeleteJobRunning || logs.length > 0) && (
                         <Card className="bg-gradient-card shadow-card border-primary/10">
                             <CardHeader>
-                                <CardTitle>Job Status</CardTitle>
-                                {deleteJobState.isDeleteJobRunning && ( <CardDescription>{deleteJobState.deleteProgress.step || 'Initializing...'}</CardDescription> )}
+                                <CardTitle>Bulk Deletion in Progress</CardTitle>
+                                {deleteJobState.isDeleteJobRunning && (
+                                     <CardDescription>
+                                        {deleteJobState.deleteProgress.step || 'Initializing...'}
+                                    </CardDescription>
+                                )}
                             </CardHeader>
                             <CardContent className="space-y-4">
-                                {deleteJobState.isDeleteJobRunning && ( <Progress value={deleteJobState.deleteProgress.progress || 0} /> )}
+                                {deleteJobState.isDeleteJobRunning && (
+                                     <Progress value={deleteJobState.deleteProgress.progress || 0} />
+                                )}
                                 <div className="flex items-center gap-2">
                                      <Terminal className="h-5 w-5 text-muted-foreground" />
                                      <Label htmlFor="logs">Live Logs</Label>
                                 </div>
-                                <Textarea id="logs" ref={logContainerRef} readOnly value={logs.join('\n')}
+                                <Textarea
+                                    id="logs"
+                                    ref={logContainerRef}
+                                    readOnly
+                                    value={logs.join('\n')}
                                     className="h-40 resize-y bg-black font-mono text-xs text-green-400"
                                     placeholder="Logs will appear here..."
                                 />
@@ -351,27 +375,34 @@ const BulkDeletePage = () => {
                     {allMembers.length > 0 && (
                         <Card className="bg-gradient-card shadow-card border-primary/10">
                             <CardHeader className="flex flex-row justify-between items-center">
-                                <div><CardTitle>Manage All Members</CardTitle><CardDescription>View, select, and delete all members from this site.</CardDescription></div>
+                                <div>
+                                    <CardTitle>Manage All Members</CardTitle>
+                                    <CardDescription>View, select, and delete all members from this site.</CardDescription>
+                                </div>
                                 <div className="flex items-center gap-2">
                                     <Input placeholder="Filter results..." value={allMembersFilterQuery} onChange={(e) => setAllMembersFilterQuery(e.target.value)} className="w-40 h-8" />
-                                    <Button variant="outline" size="sm" onClick={() => exportEmailsToTxt(filteredAllMembers, 'all-members-emails')}><Download className="mr-2 h-4 w-4"/>Export</Button>
+                                    <Button variant="outline" size="sm" onClick={() => exportEmailsToTxt(filteredAllMembers, 'all-members-emails')}><Download className="mr-2 h-4 w-4"/>Export Emails</Button>
                                 </div>
                             </CardHeader>
                             <CardContent>
                                 <div className="border rounded-lg overflow-hidden max-h-[60vh] overflow-y-auto">
                                     <Table>
-                                        <TableHeader><TableRow>
-                                            <TableHead className="w-[50px]">
-                                                <Checkbox
-                                                    checked={filteredAllMembers.length > 0 && selectedAllMembers.length === filteredAllMembers.length}
-                                                    onCheckedChange={(checked) => {
-                                                        const allMemberIds = checked ? filteredAllMembers.map(m => m.id) : [];
-                                                        setSelectedAllMembers(allMemberIds);
-                                                    }}
-                                                />
-                                            </TableHead>
-                                            <TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Status</TableHead>
-                                        </TableRow></TableHeader>
+                                        <TableHeader>
+                                            <TableRow>
+                                                <TableHead className="w-[50px]">
+                                                    <Checkbox
+                                                        checked={filteredAllMembers.length > 0 && selectedAllMembers.length === filteredAllMembers.length}
+                                                        onCheckedChange={(checked) => {
+                                                            const allMemberIds = checked ? filteredAllMembers.map(m => m.id) : [];
+                                                            setSelectedAllMembers(allMemberIds);
+                                                        }}
+                                                    />
+                                                </TableHead>
+                                                <TableHead>Name</TableHead>
+                                                <TableHead>Email</TableHead>
+                                                <TableHead>Status</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
                                         <TableBody>
                                             {filteredAllMembers.map((member) => (
                                                 <TableRow key={member.id}>
@@ -396,13 +427,16 @@ const BulkDeletePage = () => {
                                 <CardFooter className="flex justify-between items-center">
                                     <AlertDialog>
                                         <AlertDialogTrigger asChild>
-                                            <Button variant="destructive" disabled={deleteJobState.isDeleteJobRunning || staleJobDetected}>
+                                            <Button variant="destructive" disabled={deleteJobState.isDeleteJobRunning}>
                                                 <Trash2 className="mr-2 h-4 w-4" />
                                                 {deleteJobState.isDeleteJobRunning ? 'Job in Progress...' : `Delete (${selectedAllMembers.length}) Selected`}
                                             </Button>
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
-                                            <AlertDialogHeader><AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle><AlertDialogDescription>This will start a background job to delete the selected {selectedAllMembers.length} member(s).</AlertDialogDescription></AlertDialogHeader>
+                                            <AlertDialogHeader>
+                                                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                                                <AlertDialogDescription>This action will start a background job to delete the selected {selectedAllMembers.length} member(s). You can close the window and the process will continue.</AlertDialogDescription>
+                                            </AlertDialogHeader>
                                             <AlertDialogFooter>
                                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                                                 <AlertDialogAction onClick={handleDeleteAllSelected} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Yes, Start Deletion Job</AlertDialogAction>
