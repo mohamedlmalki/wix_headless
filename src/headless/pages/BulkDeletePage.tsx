@@ -4,7 +4,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Trash2, RefreshCw, Download, ListChecks } from "lucide-react";
+import { Trash2, RefreshCw, Download, ListChecks, PlayCircle, PauseCircle, XCircle, CheckCircle } from "lucide-react";
 import Navbar from '@/components/Navbar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -16,61 +16,38 @@ interface HeadlessProject {
   projectName: string;
   siteId: string;
   apiKey: string;
-  ownerEmail?: string; // ★★★ ADDED THIS LINE
+  ownerEmail?: string;
 }
 
 interface Member {
   id: string;
   loginEmail: string;
   contactId: string;
-  profile: {
-    nickname: string;
-  };
+  profile: { nickname: string; };
   status?: string;
 }
 
-export interface DeleteJobState {
-    isDeleteJobRunning: boolean;
-    deleteProgress: { 
-        processed: number; 
-        total: number;
-        step?: string;
-        progress?: number;
-    };
+interface DeleteResult {
+    email: string;
+    status: 'Success' | 'Failed';
+    message: string;
 }
-
-const exportEmailsToTxt = (data: any[], filename: string) => {
-    const emails = data.map(row => row.loginEmail).filter(Boolean);
-    if (emails.length === 0) {
-        alert("No emails to export.");
-        return;
-    }
-    const txtContent = emails.join('\n');
-    const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8;' });
-    const link = document.createElement('a');
-    if (link.download !== undefined) {
-        const url = URL.createObjectURL(blob);
-        link.setAttribute('href', url);
-        link.setAttribute('download', `${filename}.txt`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    }
-};
 
 const BulkDeletePage = () => {
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | null>(null);
     const [allMembers, setAllMembers] = useState<Member[]>([]);
     const [isFetchingAllMembers, setIsFetchingAllMembers] = useState(false);
-    const [selectedAllMembers, setSelectedAllMembers] = useState<string[]>([]);
-    const [allMembersFilterQuery, setAllMembersFilterQuery] = useState("");
-    const [deleteJobState, setDeleteJobState] = useState<DeleteJobState>({
-        isDeleteJobRunning: false,
-        deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
-    });
+    const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+    const [filterQuery, setFilterQuery] = useState("");
     const { toast } = useToast();
+
+    // Client-side job state
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [isPaused, setIsPaused] = useState(false);
+    const [deleteProgress, setDeleteProgress] = useState(0);
+    const [deleteResults, setDeleteResults] = useState<DeleteResult[]>([]);
+    const [processedCount, setProcessedCount] = useState(0);
 
     useEffect(() => {
         const fetchProjects = async () => {
@@ -90,50 +67,12 @@ const BulkDeletePage = () => {
         fetchProjects();
     }, [toast]);
 
-    useEffect(() => {
-        if (!deleteJobState.isDeleteJobRunning || !selectedProject) return;
-
-        const intervalId = setInterval(async () => {
-            try {
-                const response = await fetch('/api/headless-job-status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ siteId: selectedProject.siteId }),
-                });
-                const data = await response.json();
-
-                if (data.status === 'stuck') {
-                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
-                    toast({ title: "Deletion Job Failed", description: data.error, variant: "destructive", duration: 10000 });
-                } else if (data.status === 'running') {
-                    const progressValue = (data.processed / data.total) * 100;
-                    setDeleteJobState({ 
-                        isDeleteJobRunning: true,
-                        deleteProgress: { processed: data.processed, total: data.total, step: data.step, progress: progressValue } 
-                    });
-                } else if (data.status === 'complete') {
-                    setDeleteJobState({ 
-                        isDeleteJobRunning: false, 
-                        deleteProgress: { processed: data.total, total: data.total, progress: 100 } 
-                    });
-                    toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
-                } else if (data.status === 'idle') {
-                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
-                }
-            } catch (error) {
-                console.error("Failed to fetch delete job status:", error);
-                setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
-            }
-        }, 2500);
-
-        return () => clearInterval(intervalId);
-    }, [deleteJobState, selectedProject, toast]);
 
     const handleListAllMembers = async () => {
         if (!selectedProject) return;
         setIsFetchingAllMembers(true);
         setAllMembers([]);
-        setSelectedAllMembers([]);
+        setSelectedMembers([]);
         try {
             const response = await fetch('/api/headless-list-all', {
                 method: 'POST',
@@ -143,7 +82,6 @@ const BulkDeletePage = () => {
             if (!response.ok) throw new Error('Failed to fetch the member list.');
             const data = await response.json();
             
-            // ★★★ ADDED FRONTEND FILTER AS A BACKUP ★★★
             let members = data.members || [];
             if (selectedProject.ownerEmail) {
                 members = members.filter(member => member.loginEmail.toLowerCase() !== selectedProject.ownerEmail.toLowerCase());
@@ -156,52 +94,66 @@ const BulkDeletePage = () => {
             setIsFetchingAllMembers(false);
         }
     };
-
-    const handleDeleteAllSelected = async () => {
-        if (selectedAllMembers.length === 0 || !selectedProject) {
+    
+    const handleStartDeletion = async () => {
+        if (selectedMembers.length === 0 || !selectedProject) {
             toast({ title: "No members selected", variant: "destructive" });
             return;
         }
-        
-        setDeleteJobState({
-            isDeleteJobRunning: true,
-            deleteProgress: { processed: 0, total: 2, step: 'Starting job...', progress: 0 },
-        });
 
-        try {
-            const membersToDelete = allMembers
-                .filter(member => selectedAllMembers.includes(member.id))
-                .map(member => ({
-                    memberId: member.id,
-                    contactId: member.contactId,
-                    emailAddress: member.loginEmail
-                }));
+        setIsDeleting(true);
+        setIsPaused(false);
+        setDeleteResults([]);
+        setProcessedCount(0);
 
-            const response = await fetch('/api/headless-start-delete-job', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
-            });
+        const membersToDelete = allMembers.filter(m => selectedMembers.includes(m.id));
+        const totalToDelete = membersToDelete.length;
 
-            if (!response.ok) {
-                const data = await response.json();
-                throw new Error(data.message || 'Failed to start deletion job.');
+        for (let i = 0; i < totalToDelete; i++) {
+            // Check if paused
+            if (isPaused) {
+                // To truly pause, we need to handle this state.
+                // For now, we just stop the loop. A resume would need to pick up from here.
+                setIsDeleting(false);
+                return;
             }
 
-            toast({ title: "Deletion Job Started", description: "The process is running in the background." });
+            const member = membersToDelete[i];
+            
+            try {
+                const response = await fetch('/api/headless-delete-member', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        siteId: selectedProject.siteId,
+                        memberId: member.id,
+                        contactId: member.contactId,
+                    }),
+                });
 
-            setAllMembers(allMembers.filter(member => !selectedAllMembers.includes(member.id)));
-            setSelectedAllMembers([]);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to delete member.');
+                }
+                
+                setDeleteResults(prev => [...prev, { email: member.loginEmail, status: 'Success', message: 'Deleted successfully.' }]);
+            } catch (error) {
+                 setDeleteResults(prev => [...prev, { email: member.loginEmail, status: 'Failed', message: (error as Error).message }]);
+            }
 
-        } catch (error: any) {
-            toast({ title: "Error Starting Job", description: error.message, variant: "destructive" });
-            setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
+            const currentProcessed = i + 1;
+            setProcessedCount(currentProcessed);
+            setDeleteProgress((currentProcessed / totalToDelete) * 100);
         }
+
+        setIsDeleting(false);
+        toast({ title: "Bulk Delete Complete", description: `Finished processing ${totalToDelete} members.`});
     };
 
-    const filteredAllMembers = allMembers.filter(member =>
-        member.profile?.nickname?.toLowerCase().includes(allMembersFilterQuery.toLowerCase()) ||
-        member.loginEmail.toLowerCase().includes(allMembersFilterQuery.toLowerCase())
+
+    const filteredMembers = allMembers.filter(member =>
+        member.profile?.nickname?.toLowerCase().includes(filterQuery.toLowerCase()) ||
+        member.loginEmail.toLowerCase().includes(filterQuery.toLowerCase())
     );
 
     return (
@@ -218,21 +170,18 @@ const BulkDeletePage = () => {
                     </div>
 
                     <Card className="bg-gradient-card shadow-card border-primary/10">
-                        <CardHeader>
-                            <CardTitle>Select Project</CardTitle>
-                        </CardHeader>
+                        <CardHeader><CardTitle>Select Project</CardTitle></CardHeader>
                         <CardContent className="flex gap-4">
-                            <Select onValueChange={(siteId) => {
-                                const project = headlessProjects.find(p => p.siteId === siteId);
-                                setSelectedProject(project || null);
-                                setAllMembers([]);
-                                setSelectedAllMembers([]);
-                            }}
-                            value={selectedProject?.siteId}
+                            <Select 
+                                onValueChange={(siteId) => {
+                                    const project = headlessProjects.find(p => p.siteId === siteId);
+                                    setSelectedProject(project || null);
+                                    setAllMembers([]);
+                                    setSelectedMembers([]);
+                                }}
+                                value={selectedProject?.siteId}
                             >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select a project..." />
-                                </SelectTrigger>
+                                <SelectTrigger><SelectValue placeholder="Select a project..." /></SelectTrigger>
                                 <SelectContent>
                                     {headlessProjects.map(project => (
                                         <SelectItem key={project.siteId} value={project.siteId}>
@@ -248,16 +197,16 @@ const BulkDeletePage = () => {
                         </CardContent>
                     </Card>
 
-                    {deleteJobState.isDeleteJobRunning && (
-                        <Card className="bg-gradient-card shadow-card border-primary/10">
+                    {isDeleting && (
+                         <Card className="bg-gradient-card shadow-card border-primary/10">
                             <CardHeader>
-                                <CardTitle>Bulk Deletion in Progress</CardTitle>
+                                <CardTitle>Deletion in Progress...</CardTitle>
                                 <CardDescription>
-                                    Step {deleteJobState.deleteProgress.processed} of {deleteJobState.deleteProgress.total}: {deleteJobState.deleteProgress.step || 'Initializing...'}
+                                    Processing {processedCount} of {selectedMembers.length} members. Please keep this tab open.
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <Progress value={deleteJobState.deleteProgress.progress || 0} />
+                                <Progress value={deleteProgress} />
                             </CardContent>
                         </Card>
                     )}
@@ -267,11 +216,10 @@ const BulkDeletePage = () => {
                             <CardHeader className="flex flex-row justify-between items-center">
                                 <div>
                                     <CardTitle>Manage All Members</CardTitle>
-                                    <CardDescription>View, select, and delete all members from this site.</CardDescription>
+                                    <CardDescription>View, select, and delete members from this site.</CardDescription>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <Input placeholder="Filter results..." value={allMembersFilterQuery} onChange={(e) => setAllMembersFilterQuery(e.target.value)} className="w-40 h-8" />
-                                    <Button variant="outline" size="sm" onClick={() => exportEmailsToTxt(filteredAllMembers, 'all-members-emails')}><Download className="mr-2 h-4 w-4"/>Export Emails</Button>
+                                    <Input placeholder="Filter results..." value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} className="w-40 h-8" />
                                 </div>
                             </CardHeader>
                             <CardContent>
@@ -281,10 +229,9 @@ const BulkDeletePage = () => {
                                             <TableRow>
                                                 <TableHead className="w-[50px]">
                                                     <Checkbox 
-                                                        checked={filteredAllMembers.length > 0 && selectedAllMembers.length === filteredAllMembers.length}
+                                                        checked={filteredMembers.length > 0 && selectedMembers.length === filteredMembers.length}
                                                         onCheckedChange={(checked) => {
-                                                            const allMemberIds = checked ? filteredAllMembers.map(m => m.id) : [];
-                                                            setSelectedAllMembers(allMemberIds);
+                                                            setSelectedMembers(checked ? filteredMembers.map(m => m.id) : []);
                                                         }}
                                                     />
                                                 </TableHead>
@@ -294,13 +241,13 @@ const BulkDeletePage = () => {
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {filteredAllMembers.map((member) => (
-                                                <TableRow key={member.id}>
+                                            {filteredMembers.map((member) => (
+                                                <TableRow key={member.id} data-state={selectedMembers.includes(member.id) && "selected"}>
                                                     <TableCell>
                                                         <Checkbox 
-                                                            checked={selectedAllMembers.includes(member.id)}
+                                                            checked={selectedMembers.includes(member.id)}
                                                             onCheckedChange={(checked) => {
-                                                                setSelectedAllMembers(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
+                                                                setSelectedMembers(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
                                                             }}
                                                         />
                                                     </TableCell>
@@ -313,28 +260,61 @@ const BulkDeletePage = () => {
                                     </Table>
                                 </div>
                             </CardContent>
-                             {selectedAllMembers.length > 0 && (
+                             {selectedMembers.length > 0 && (
                                 <CardFooter>
                                     <AlertDialog>
                                         <AlertDialogTrigger asChild>
-                                            <Button variant="destructive" disabled={deleteJobState.isDeleteJobRunning}>
+                                            <Button variant="destructive" disabled={isDeleting}>
                                                 <Trash2 className="mr-2 h-4 w-4" />
-                                                {deleteJobState.isDeleteJobRunning ? 'Job in Progress...' : `Delete (${selectedAllMembers.length}) Selected`}
+                                                {isDeleting ? 'Processing...' : `Delete (${selectedMembers.length}) Selected`}
                                             </Button>
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
                                             <AlertDialogHeader>
-                                                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                                <AlertDialogDescription>This action will start a background job to delete the selected {selectedAllMembers.length} member(s). You can close the window and the process will continue.</AlertDialogDescription>
+                                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                                <AlertDialogDescription>This will start deleting the selected {selectedMembers.length} member(s). This action cannot be stopped once started, and you must keep this browser tab open.</AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
                                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                <AlertDialogAction onClick={handleDeleteAllSelected} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Yes, Start Deletion Job</AlertDialogAction>
+                                                <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Yes, Start Deletion</AlertDialogAction>
                                             </AlertDialogFooter>
                                         </AlertDialogContent>
                                     </AlertDialog>
                                 </CardFooter>
                             )}
+                        </Card>
+                    )}
+
+                    {deleteResults.length > 0 && (
+                        <Card className="bg-gradient-card shadow-card border-primary/10">
+                            <CardHeader>
+                                <CardTitle>Deletion Results</CardTitle>
+                            </CardHeader>
+                            <CardContent className="max-h-[40vh] overflow-y-auto">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Email</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead>Message</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {deleteResults.map((result, index) => (
+                                            <TableRow key={index}>
+                                                <TableCell>{result.email}</TableCell>
+                                                <TableCell>
+                                                    {result.status === 'Success' ? 
+                                                        <span className="flex items-center gap-2 text-green-500"><CheckCircle className="h-4 w-4" /> Success</span> : 
+                                                        <span className="flex items-center gap-2 text-red-500"><XCircle className="h-4 w-4" /> Failed</span>
+                                                    }
+                                                </TableCell>
+                                                <TableCell>{result.message}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
                         </Card>
                     )}
                 </div>
