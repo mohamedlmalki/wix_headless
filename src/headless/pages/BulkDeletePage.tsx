@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label"; // <-- This was the missing import
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { Trash2, RefreshCw, Download, ListChecks, Terminal } from "lucide-react";
@@ -289,7 +290,6 @@ const BulkDeletePage = () => {
     const handleProjectChange = (siteId: string) => {
         const project = headlessProjects.find(p => p.siteId === siteId);
         setSelectedProject(project || null);
-        // Reset all states related to the previous project
         setAllMembers([]);
         setSelectedAllMembers([]);
         setAllMembersFilterQuery("");
