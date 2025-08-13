@@ -263,6 +263,25 @@ const WebhookTestPage = ({
                         </DialogContent>
                     </Dialog>
 
+                    <Card className="bg-gradient-card shadow-card border-primary/10">
+                        <CardHeader>
+                            <div className="flex justify-between items-center">
+                                <div><CardTitle>Create Payload</CardTitle><CardDescription>Enter emails and content to send.</CardDescription></div>
+                                <Badge variant="secondary">{emailCount} email(s)</Badge>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="space-y-2"><Label htmlFor="emails">Emails</Label><Textarea id="emails" placeholder="user1@example.com, user2@example.com" className="h-24" value={emails} onChange={(e) => setEmails(e.target.value)} disabled={currentJob?.isRunning} /></div>
+                            <div className="space-y-2"><Label htmlFor="subject">Subject</Label><Input id="subject" placeholder="Your test subject" value={subject} onChange={(e) => setSubject(e.target.value)} disabled={currentJob?.isRunning} /></div>
+                            <div className="space-y-2"><Label htmlFor="content">Content (can be HTML)</Label><Textarea id="content" placeholder="<h1>Hello!</h1><p>This is a test.</p>" className="h-32" value={content} onChange={(e) => setContent(e.target.value)} disabled={currentJob?.isRunning} /></div>
+                            <Button onClick={handleStartJob} disabled={!selectedProject || currentJob?.isRunning}>
+                                {currentJob?.isRunning ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                                {currentJob?.isRunning ? 'Job Running...' : `Send to ${emailCount} Emails`}
+                            </Button>
+                        </CardContent>
+                    </Card>
+
+                    {/* *** UI CHANGE: Moved this section here *** */}
                     {currentJob?.isRunning && (
                         <Card className="bg-gradient-primary text-primary-foreground shadow-glow">
                             <CardContent className="p-6">
@@ -286,25 +305,7 @@ const WebhookTestPage = ({
                             </CardContent>
                         </Card>
                     )}
-
-                    <Card className="bg-gradient-card shadow-card border-primary/10">
-                        <CardHeader>
-                            <div className="flex justify-between items-center">
-                                <div><CardTitle>Create Payload</CardTitle><CardDescription>Enter emails and content to send.</CardDescription></div>
-                                <Badge variant="secondary">{emailCount} email(s)</Badge>
-                            </div>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="space-y-2"><Label htmlFor="emails">Emails</Label><Textarea id="emails" placeholder="user1@example.com, user2@example.com" className="h-24" value={emails} onChange={(e) => setEmails(e.target.value)} disabled={currentJob?.isRunning} /></div>
-                            <div className="space-y-2"><Label htmlFor="subject">Subject</Label><Input id="subject" placeholder="Your test subject" value={subject} onChange={(e) => setSubject(e.target.value)} disabled={currentJob?.isRunning} /></div>
-                            <div className="space-y-2"><Label htmlFor="content">Content (can be HTML)</Label><Textarea id="content" placeholder="<h1>Hello!</h1><p>This is a test.</p>" className="h-32" value={content} onChange={(e) => setContent(e.target.value)} disabled={currentJob?.isRunning} /></div>
-                            <Button onClick={handleStartJob} disabled={!selectedProject || currentJob?.isRunning}>
-                                {currentJob?.isRunning ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                {currentJob?.isRunning ? 'Job Running...' : `Send to ${emailCount} Emails`}
-                            </Button>
-                        </CardContent>
-                    </Card>
-
+                    
                     {currentJob?.results && currentJob.results.length > 0 && (
                         <Card className="bg-gradient-card shadow-card border-primary/10">
                             <CardHeader className="flex flex-row justify-between items-center">
