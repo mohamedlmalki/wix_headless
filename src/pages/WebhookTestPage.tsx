@@ -64,11 +64,11 @@ const WebhookTestPage = ({
                 });
                 const data = await response.json();
                 
-                if (data.status === 'running' || data.status === 'paused' || data.status === 'complete') {
+                if (data.status === 'running' || data.status === 'paused' || data.status === 'complete' || data.status === 'canceled') {
                     setWebhookJobs(prev => ({
                         ...prev,
                         [selectedProject.siteId]: {
-                            isRunning: data.status !== 'complete',
+                            isRunning: data.status === 'running' || data.status === 'paused',
                             isPaused: data.status === 'paused',
                             processed: data.processed,
                             total: data.total,
@@ -78,6 +78,9 @@ const WebhookTestPage = ({
                     }));
                     if (data.status === 'complete') {
                         toast({ title: "Webhook Job Complete!", description: `Finished sending to ${data.total} emails.` });
+                    }
+                    if (data.status === 'canceled') {
+                        toast({ title: "Webhook Job Canceled", description: "The job has been stopped." });
                     }
                 } else if (data.status === 'stuck') {
                      setWebhookJobs(prev => ({...prev, [selectedProject.siteId]: { ...prev[selectedProject.siteId], isRunning: false }}));
