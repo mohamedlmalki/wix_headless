@@ -40,6 +40,61 @@ async function fetchAllMembers(project) {
   return allMembers;
 }
 
+// *** NEW: Fetches all members who are admins ***
+async function getAdminMemberIds(project) {
+    const adminMemberIds = new Set();
+    
+    // First, get all available roles for the site
+    const rolesUrl = 'https://www.wixapis.com/roles/v1/roles';
+    const rolesResponse = await fetch(rolesUrl, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': project.apiKey,
+            'wix-site-id': project.siteId,
+        }
+    });
+
+    if (!rolesResponse.ok) {
+        console.warn("Could not fetch site roles. Proceeding without filtering admins.");
+        return [];
+    }
+    
+    const { roles } = await rolesResponse.json();
+    
+    // Find the IDs of roles that are for site contributors (admins)
+    const adminRoleIds = roles
+        .filter(role => role.systemType === 'SITE_CONTRIBUTOR' || role.name === 'Admin')
+        .map(role => role.id);
+
+    if (adminRoleIds.length === 0) {
+        return [];
+    }
+
+    // For each admin role, get the members assigned to it
+    for (const roleId of adminRoleIds) {
+        const membersInRoleUrl = `https://www.wixapis.com/roles/v1/roles/${roleId}/members`;
+        const membersResponse = await fetch(membersInRoleUrl, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': project.apiKey,
+                'wix-site-id': project.siteId,
+            }
+        });
+
+        if (membersResponse.ok) {
+            const { members } = await membersResponse.json();
+            if (members) {
+                members.forEach(member => adminMemberIds.add(member.id));
+            }
+        }
+    }
+
+    return Array.from(adminMemberIds);
+}
+
+
 // Handles POST requests to /api/headless-list-all
 export async function onRequestPost({ request, env }) {
   try {
@@ -60,14 +115,14 @@ export async function onRequestPost({ request, env }) {
       });
     }
 
-    const allMembers = await fetchAllMembers(project);
+    // Fetch both lists in parallel
+    const [allMembers, adminIds] = await Promise.all([
+        fetchAllMembers(project),
+        getAdminMemberIds(project)
+    ]);
 
-    // *** NEW: Filter out any member that has the "Admin" role ***
-    const filteredMembers = allMembers.filter(member => {
-        // Check if the member has a 'roles' array and if that array includes a role named "Admin"
-        const isAdmin = member.roles && member.roles.some(role => role.name === 'Admin');
-        return !isAdmin;
-    });
+    // Filter out the admins from the main member list
+    const filteredMembers = allMembers.filter(member => !adminIds.includes(member.id));
 
     return new Response(JSON.stringify({ members: filteredMembers }), {
       status: 200,
