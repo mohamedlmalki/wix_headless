@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -70,6 +70,7 @@ const BulkDeletePage = () => {
         deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
     });
     const { toast } = useToast();
+    const pollingIntervalRef = useRef<number | null>(null);
 
     useEffect(() => {
         const fetchProjects = async () => {
@@ -89,10 +90,68 @@ const BulkDeletePage = () => {
         fetchProjects();
     }, [toast]);
 
+    const stopPolling = () => {
+        if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+        }
+    };
+
+    const startPolling = () => {
+        stopPolling(); // Ensure no multiple intervals are running
+        
+        pollingIntervalRef.current = window.setInterval(async () => {
+            if (!selectedProject) {
+                stopPolling();
+                return;
+            }
+            try {
+                const response = await fetch('/api/headless-job-status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ siteId: selectedProject.siteId }),
+                });
+
+                if (!response.ok) throw new Error(`Status check failed: ${response.statusText}`);
+                const data = await response.json();
+
+                if (data.status === 'running') {
+                    const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
+                    setDeleteJobState({
+                        isDeleteJobRunning: true,
+                        deleteProgress: { processed: data.processed, total: data.total, step: data.step, progress: progressValue }
+                    });
+                } else if (data.status === 'complete') {
+                    setDeleteJobState({
+                        isDeleteJobRunning: false,
+                        deleteProgress: { processed: data.total, total: data.total, progress: 100, step: 'Complete!' }
+                    });
+                    toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
+                    stopPolling();
+                } else if (data.status === 'idle') {
+                     setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
+                     stopPolling();
+                }
+            } catch (error) {
+                console.error("Failed to fetch delete job status:", error);
+                toast({ title: "Polling Error", description: "Could not get job status. Try resetting the job.", variant: "destructive" });
+                stopPolling();
+            }
+        }, 2500);
+    };
+
+    useEffect(() => {
+        if (deleteJobState.isDeleteJobRunning) {
+            startPolling();
+        } else {
+            stopPolling();
+        }
+        return () => stopPolling(); // Cleanup on unmount
+    }, [deleteJobState.isDeleteJobRunning, selectedProject]);
+    
     useEffect(() => {
         if (!selectedProject) return;
-
-        // Check for an ongoing job when the project changes
+        setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
         const checkInitialJobStatus = async () => {
             try {
                 const response = await fetch('/api/headless-job-status', {
@@ -108,56 +167,9 @@ const BulkDeletePage = () => {
                 console.error("Could not check initial job status:", error);
             }
         };
-
         checkInitialJobStatus();
     }, [selectedProject]);
-
-
-    useEffect(() => {
-        if (!deleteJobState.isDeleteJobRunning || !selectedProject) return;
-
-        const intervalId = setInterval(async () => {
-            try {
-                const response = await fetch('/api/headless-job-status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ siteId: selectedProject.siteId }),
-                });
-
-                if (!response.ok) {
-                    // Stop polling if the status endpoint fails
-                    throw new Error(`Status check failed: ${response.statusText}`);
-                }
-
-                const data = await response.json();
-
-                if (data.status === 'running') {
-                    const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
-                    setDeleteJobState({
-                        isDeleteJobRunning: true,
-                        deleteProgress: { processed: data.processed, total: data.total, step: data.step, progress: progressValue }
-                    });
-                } else if (data.status === 'complete') {
-                    setDeleteJobState({
-                        isDeleteJobRunning: false,
-                        deleteProgress: { processed: data.total, total: data.total, progress: 100, step: 'Complete!' }
-                    });
-                    toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
-                    clearInterval(intervalId); // Stop polling on completion
-                } else if (data.status === 'idle') {
-                     setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
-                     clearInterval(intervalId); // Stop polling if job is no longer found
-                }
-            } catch (error) {
-                console.error("Failed to fetch delete job status:", error);
-                toast({ title: "Polling Error", description: "Could not get job status. It may have failed. Try resetting the job.", variant: "destructive" });
-                clearInterval(intervalId); // Stop polling on error
-            }
-        }, 2500);
-
-        return () => clearInterval(intervalId);
-    }, [deleteJobState.isDeleteJobRunning, selectedProject, toast]);
-
+    
     const handleListAllMembers = async () => {
         if (!selectedProject) return;
         setIsFetchingAllMembers(true);
@@ -185,11 +197,6 @@ const BulkDeletePage = () => {
             return;
         }
 
-        setDeleteJobState({
-            isDeleteJobRunning: true,
-            deleteProgress: { processed: 0, total: selectedAllMembers.length * 2, step: 'Initializing job...', progress: 0 },
-        });
-
         try {
             const membersToDelete = allMembers
                 .filter(member => selectedAllMembers.includes(member.id))
@@ -198,6 +205,11 @@ const BulkDeletePage = () => {
                     contactId: member.contactId,
                 }));
 
+            setDeleteJobState({
+                isDeleteJobRunning: true,
+                deleteProgress: { processed: 0, total: membersToDelete.length * 2, step: 'Initializing job...', progress: 0 },
+            });
+            
             const response = await fetch('/api/headless-start-delete-job', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -205,17 +217,12 @@ const BulkDeletePage = () => {
             });
 
             if (!response.ok) {
-                let errorMessage = `Failed to start job with status: ${response.status}`;
+                let errorMessage = `Failed to start job (Status: ${response.status})`;
                 try {
                     const data = await response.json();
                     errorMessage = data.message || JSON.stringify(data);
                 } catch (e) {
-                    const textResponse = await response.text();
-                    if (textResponse) {
-                        errorMessage += `\nServer response: ${textResponse}`;
-                    } else {
-                        errorMessage += "\nServer returned an empty error response.";
-                    }
+                     errorMessage = "Failed to start job. The server returned a non-JSON response.";
                 }
                 throw new Error(errorMessage);
             }
