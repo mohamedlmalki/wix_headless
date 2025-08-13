@@ -9,17 +9,21 @@ export async function onRequestPost({ request, env }) {
             return new Response(JSON.stringify({ message: "No job found to control." }), { status: 404 });
         }
 
-        let jobState = JSON.parse(currentJobJson);
+        const jobState = JSON.parse(currentJobJson);
 
-        if (action === 'pause') jobState.status = 'paused';
-        if (action === 'resume') jobState.status = 'running';
-        if (action === 'cancel') {
-            jobState.status = 'canceled';
-            // We can delete the key after a short delay to clean up
-            // For now, we'll just mark it as canceled
+        let newStatus = jobState.status;
+        if (action === 'pause') {
+            newStatus = 'paused';
+        } else if (action === 'resume') {
+            newStatus = 'running';
+        } else if (action === 'cancel') {
+            newStatus = 'canceled';
         }
 
-        await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
+        // Create a new state object instead of mutating the old one
+        const newJobState = { ...jobState, status: newStatus };
+
+        await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(newJobState));
 
         return new Response(JSON.stringify({ success: true, message: `Job action '${action}' applied.` }), { status: 200 });
     } catch (e) {
