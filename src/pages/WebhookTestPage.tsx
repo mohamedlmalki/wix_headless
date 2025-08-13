@@ -65,45 +65,48 @@ const WebhookTestPage = ({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ siteId: selectedProject.siteId }),
                 });
-                const data = await statusResponse.json();
-                
-                if (data.status === 'running' || data.status === 'paused' || data.status === 'complete' || data.status === 'canceled') {
-                    setWebhookJobs(prev => ({
-                        ...prev,
-                        [selectedProject.siteId]: {
-                            isRunning: data.status === 'running' || data.status === 'paused',
-                            isPaused: data.status === 'paused',
-                            processed: data.processed,
-                            total: data.total,
-                            progress: (data.processed / data.total) * 100,
-                            results: data.results || [],
-                        }
-                    }));
 
+                if (!statusResponse.ok) {
+                    setWebhookJobs(prev => ({...prev, [selectedProject.siteId]: { ...prev[selectedProject.siteId], isRunning: false }}));
+                    return;
+                }
+
+                const data = await statusResponse.json();
+
+                // Always update the UI state
+                setWebhookJobs(prev => ({
+                    ...prev,
+                    [selectedProject.siteId]: {
+                        ...prev[selectedProject.siteId],
+                        isRunning: data.status === 'running' || data.status === 'paused',
+                        isPaused: data.status === 'paused',
+                        processed: data.processed,
+                        total: data.total,
+                        progress: data.total > 0 ? (data.processed / data.total) * 100 : 0,
+                        results: data.results || [],
+                    }
+                }));
+                
+                if (data.status === 'complete' || data.status === 'canceled') {
                     if (data.status === 'complete') {
                         toast({ title: "Webhook Job Complete!", description: `Finished sending to ${data.total} emails.` });
-                        return;
                     }
                     if (data.status === 'canceled') {
                         toast({ title: "Webhook Job Canceled", description: "The job has been stopped." });
-                        return;
                     }
+                    return; // Stop the loop
+                }
 
-                    // If the job is running (not paused), trigger the next step
-                    if (data.status === 'running') {
-                        await fetch('/api/headless-webhook-job-processor', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ siteId: selectedProject.siteId }),
-                        });
-                    }
-                } else if (data.status === 'stuck') {
-                     setWebhookJobs(prev => ({...prev, [selectedProject.siteId]: { ...prev[selectedProject.siteId], isRunning: false }}));
-                     toast({ title: "Job Failed", description: data.error, variant: "destructive" });
+                if (data.status === 'running') {
+                    await fetch('/api/headless-webhook-job-tick', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ siteId: selectedProject.siteId }),
+                    });
                 }
 
             } catch (error) {
-                console.error("Failed to fetch webhook job status:", error);
+                console.error("Failed to process webhook job:", error);
             }
         }, 1500);
 
@@ -299,7 +302,6 @@ const WebhookTestPage = ({
                         </CardContent>
                     </Card>
 
-                    {/* *** UI CHANGE: Moved this section here *** */}
                     {currentJob?.isRunning && (
                         <Card className="bg-gradient-primary text-primary-foreground shadow-glow">
                             <CardContent className="p-6">
@@ -323,7 +325,7 @@ const WebhookTestPage = ({
                             </CardContent>
                         </Card>
                     )}
-
+                    
                     {currentJob?.results && currentJob.results.length > 0 && (
                         <Card className="bg-gradient-card shadow-card border-primary/10">
                             <CardHeader className="flex flex-row justify-between items-center">
