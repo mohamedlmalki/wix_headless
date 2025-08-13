@@ -11,7 +11,6 @@ import NotFound from "./pages/NotFound";
 import { HeadlessImportPage } from './headless/pages/HeadlessImportPage';
 import CampaignStatsPage, { CampaignStatsState } from './headless/pages/CampaignStatsPage';
 import BulkDeletePage from './headless/pages/BulkDeletePage';
-import WebhookTestPage from "./pages/WebhookTestPage";
 import { jobManager, JobState } from './headless/lib/JobManager';
 
 export interface HeadlessProject {
@@ -20,16 +19,6 @@ export interface HeadlessProject {
     apiKey: string;
     campaigns?: { [key: string]: string; };
     webhookUrl?: string;
-}
-
-// *** ADDED: State definition for webhook jobs ***
-export interface WebhookJobState {
-    isRunning: boolean;
-    isPaused: boolean;
-    progress: number;
-    processed: number;
-    total: number;
-    results: any[];
 }
 
 const queryClient = new QueryClient();
@@ -53,9 +42,6 @@ const App = () => {
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | null>(null);
     
-    // *** ADDED: State for webhook jobs ***
-    const [webhookJobs, setWebhookJobs] = useState<Record<string, WebhookJobState>>({});
-
     useEffect(() => {
         const fetchProjects = async () => {
             try {
@@ -131,13 +117,6 @@ const App = () => {
                         <Route
                             path="/bulk-delete"
                             element={<BulkDeletePage {...projectManagerProps} />}
-                        />
-                        <Route path="/webhook-test" 
-                            element={<WebhookTestPage 
-                                {...projectManagerProps} 
-                                webhookJobs={webhookJobs}
-                                setWebhookJobs={setWebhookJobs}
-                            />} 
                         />
                         <Route path="*" element={<NotFound />} />
                     </Routes>
