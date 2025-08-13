@@ -30,8 +30,8 @@ interface Member {
 
 export interface DeleteJobState {
     isDeleteJobRunning: boolean;
-    deleteProgress: { 
-        processed: number; 
+    deleteProgress: {
+        processed: number;
         total: number;
         step?: string;
         progress?: number;
@@ -106,14 +106,14 @@ const BulkDeletePage = () => {
                     toast({ title: "Deletion Job Failed", description: data.error, variant: "destructive", duration: 10000 });
                 } else if (data.status === 'running') {
                     const progressValue = (data.processed / data.total) * 100;
-                    setDeleteJobState({ 
+                    setDeleteJobState({
                         isDeleteJobRunning: true,
-                        deleteProgress: { processed: data.processed, total: data.total, step: data.step, progress: progressValue } 
+                        deleteProgress: { processed: data.processed, total: data.total, step: data.step, progress: progressValue }
                     });
                 } else if (data.status === 'complete') {
-                    setDeleteJobState({ 
-                        isDeleteJobRunning: false, 
-                        deleteProgress: { processed: data.total, total: data.total, progress: 100 } 
+                    setDeleteJobState({
+                        isDeleteJobRunning: false,
+                        deleteProgress: { processed: data.total, total: data.total, progress: 100 }
                     });
                     toast({ title: "Bulk delete complete!", description: `Successfully removed members and contacts.` });
                 } else if (data.status === 'idle') {
@@ -154,7 +154,7 @@ const BulkDeletePage = () => {
             toast({ title: "No members selected", variant: "destructive" });
             return;
         }
-        
+
         setDeleteJobState({
             isDeleteJobRunning: true,
             deleteProgress: { processed: 0, total: 2, step: 'Starting job...', progress: 0 },
@@ -188,6 +188,24 @@ const BulkDeletePage = () => {
         } catch (error: any) {
             toast({ title: "Error Starting Job", description: error.message, variant: "destructive" });
             setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...deleteJobState.deleteProgress } });
+        }
+    };
+
+    const handleResetJob = async () => {
+        if (!selectedProject) return;
+        try {
+            await fetch('/api/headless-reset-job', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ siteId: selectedProject.siteId }),
+            });
+            setDeleteJobState({
+                isDeleteJobRunning: false,
+                deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
+            });
+            toast({ title: "Job Reset", description: "The deletion job status has been cleared." });
+        } catch (error) {
+            toast({ title: "Error", description: "Could not reset the job status.", variant: "destructive" });
         }
     };
 
@@ -272,7 +290,7 @@ const BulkDeletePage = () => {
                                         <TableHeader>
                                             <TableRow>
                                                 <TableHead className="w-[50px]">
-                                                    <Checkbox 
+                                                    <Checkbox
                                                         checked={filteredAllMembers.length > 0 && selectedAllMembers.length === filteredAllMembers.length}
                                                         onCheckedChange={(checked) => {
                                                             const allMemberIds = checked ? filteredAllMembers.map(m => m.id) : [];
@@ -289,7 +307,7 @@ const BulkDeletePage = () => {
                                             {filteredAllMembers.map((member) => (
                                                 <TableRow key={member.id}>
                                                     <TableCell>
-                                                        <Checkbox 
+                                                        <Checkbox
                                                             checked={selectedAllMembers.includes(member.id)}
                                                             onCheckedChange={(checked) => {
                                                                 setSelectedAllMembers(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
@@ -306,7 +324,7 @@ const BulkDeletePage = () => {
                                 </div>
                             </CardContent>
                              {selectedAllMembers.length > 0 && (
-                                <CardFooter>
+                                <CardFooter className="flex justify-between items-center">
                                     <AlertDialog>
                                         <AlertDialogTrigger asChild>
                                             <Button variant="destructive" disabled={deleteJobState.isDeleteJobRunning}>
@@ -325,6 +343,12 @@ const BulkDeletePage = () => {
                                             </AlertDialogFooter>
                                         </AlertDialogContent>
                                     </AlertDialog>
+                                    {deleteJobState.isDeleteJobRunning && (
+                                        <Button variant="outline" onClick={handleResetJob}>
+                                            <RefreshCw className="mr-2 h-4 w-4" />
+                                            Reset Stuck Job
+                                        </Button>
+                                    )}
                                 </CardFooter>
                             )}
                         </Card>
