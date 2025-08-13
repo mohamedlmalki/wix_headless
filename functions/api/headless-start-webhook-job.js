@@ -6,36 +6,29 @@ export async function onRequestPost(context) {
     const { siteId, webhookUrl, emails, subject, content } = await request.json();
     const jobKey = `webhook_job_${siteId}`;
 
-    // Start the background job
     context.waitUntil((async () => {
-        // Initialize the job state in the KV store
         let jobState = { status: 'running', processed: 0, total: emails.length, results: [] };
         await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(jobState));
 
         for (let i = 0; i < emails.length; i++) {
-            // *** FIX: Always read the most current job state from the server ***
             let currentJobState = JSON.parse(await env.WIX_HEADLESS_CONFIG.get(jobKey));
 
-            // Check for control signals (pause or cancel)
-            if (currentJobState.status === 'canceled') {
-                break; // Exit the loop if the job is canceled
-            }
-
-            // *** FIX: Implement a while loop to handle the paused state ***
-            while (currentJobState.status === 'paused') {
-                await delay(2500); // Wait for a moment
-                // Re-fetch the state to see if it has changed
-                currentJobState = JSON.parse(await env.WIX_HEADLESS_CONFIG.get(jobKey));
-                if (currentJobState.status === 'canceled') {
-                    // Also check for cancellation inside the pause loop
-                    break;
-                }
-            }
-            
-            // If the job was cancelled while paused, break the outer loop too
             if (currentJobState.status === 'canceled') {
                 break;
             }
+
+            // This while loop will halt execution as long as the job is paused.
+            while (currentJobState.status === 'paused') {
+                await delay(2500); // Check the status every 2.5 seconds
+                currentJobState = JSON.parse(await env.WIX_HEADLESS_CONFIG.get(jobKey));
+                // Also check for cancellation while paused
+                if (currentJobState.status === 'canceled') break;
+            }
+
+            if (currentJobState.status === 'canceled') {
+                break; // Exit the main loop if canceled
+            }
+
 
             const email = emails[i];
             const payload = {
@@ -59,14 +52,14 @@ export async function onRequestPost(context) {
             } catch (error) {
                 currentJobState.results.push({ email, status: 'Failed', reason: error.message });
             }
-            
-            // Update progress and write the modified state back to the server
+
+            // Update progress and save the state
             currentJobState.processed = i + 1;
             await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(currentJobState));
-            await delay(1000); // Delay between each webhook
+            await delay(1000);
         }
 
-        // Final update to mark the job as complete
+        // Mark the job as complete if it wasn't canceled
         let finalJobState = JSON.parse(await env.WIX_HEADLESS_CONFIG.get(jobKey));
         if (finalJobState.status !== 'canceled') {
             finalJobState.status = 'complete';
