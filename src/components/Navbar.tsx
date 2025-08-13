@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Server, BarChart2 } from "lucide-react"; // <-- Import the 'BarChart2' icon
+import { Server, BarChart2, Trash2 } from "lucide-react"; 
 
 const Navbar = () => {
   const location = useLocation();
@@ -25,7 +25,6 @@ const Navbar = () => {
               Headless Import
             </Button>
           </Link>
-          {/* This is the new link for the Campaign Stats page */}
           <Link to="/campaign-stats">
             <Button 
               variant={isActive("/campaign-stats") ? "default" : "ghost"} 
@@ -34,6 +33,16 @@ const Navbar = () => {
             >
               <BarChart2 size={16} />
               Campaign Stats
+            </Button>
+          </Link>
+          <Link to="/bulk-delete">
+            <Button 
+              variant={isActive("/bulk-delete") ? "default" : "ghost"} 
+              size="sm"
+              className="gap-2"
+            >
+              <Trash2 size={16} />
+              Bulk Delete
             </Button>
           </Link>
         </div>
