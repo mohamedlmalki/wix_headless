@@ -13,7 +13,6 @@ import Navbar from '@/components/Navbar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Progress } from '@/components/ui/progress';
 
 // Types
 interface HeadlessProject {
@@ -27,21 +26,8 @@ interface Member {
   id: string;
   loginEmail: string;
   contactId: string;
-  profile: {
-    nickname: string;
-  };
+  profile: { nickname: string; };
   status?: string;
-}
-
-export interface DeleteJobState {
-    isDeleteJobRunning: boolean;
-    hasFailed: boolean;
-    deleteProgress: {
-        processed: number;
-        total: number;
-        step?: string;
-        progress?: number;
-    };
 }
 
 const exportEmailsToTxt = (data: any[], filename: string) => {
@@ -60,7 +46,6 @@ const exportEmailsToTxt = (data: any[], filename: string) => {
     document.body.removeChild(link);
 };
 
-
 const BulkDeletePage = () => {
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | null>(null);
@@ -68,14 +53,9 @@ const BulkDeletePage = () => {
     const [isFetchingAllMembers, setIsFetchingAllMembers] = useState(false);
     const [selectedAllMembers, setSelectedAllMembers] = useState<string[]>([]);
     const [allMembersFilterQuery, setAllMembersFilterQuery] = useState("");
-    const [deleteJobState, setDeleteJobState] = useState<DeleteJobState>({
-        isDeleteJobRunning: false,
-        hasFailed: false,
-        deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
-    });
+    const [isDeleting, setIsDeleting] = useState(false);
     const [logs, setLogs] = useState<string[]>([]);
     const { toast } = useToast();
-    const pollingIntervalRef = useRef<number | null>(null);
     const logContainerRef = useRef<HTMLTextAreaElement>(null);
 
     useEffect(() => {
@@ -108,95 +88,6 @@ const BulkDeletePage = () => {
         fetchProjects();
     }, []);
 
-    const stopPolling = () => {
-        if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-        }
-    };
-
-    const startPolling = (siteId: string) => {
-        stopPolling();
-        
-        pollingIntervalRef.current = window.setInterval(async () => {
-            try {
-                const response = await fetch('/api/headless-job-status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ siteId }),
-                });
-
-                if (!response.ok) throw new Error(`Status check failed: ${response.statusText}`);
-                const data = await response.json();
-
-                const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
-                
-                if (data.step && data.step !== deleteJobState.deleteProgress.step) {
-                    addLog(data.step);
-                }
-
-                if (data.status === 'running') {
-                    setDeleteJobState({ isDeleteJobRunning: true, hasFailed: false, deleteProgress: { ...data, progress: progressValue }});
-                } else if (data.status === 'complete') {
-                    toast({ title: "Bulk delete complete!", description: `Successfully processed member deletions.` });
-                    stopPolling();
-                    setDeleteJobState({ isDeleteJobRunning: false, hasFailed: false, deleteProgress: { ...data, progress: 100 }});
-                    handleListAllMembers();
-                } else if (data.status === 'error') {
-                    toast({ title: "Job Failed", description: "The deletion job encountered an error.", variant: "destructive" });
-                    stopPolling();
-                    setDeleteJobState({ isDeleteJobRunning: false, hasFailed: true, deleteProgress: { ...data, progress: progressValue }});
-                } else if (data.status === 'idle') {
-                     setDeleteJobState({ isDeleteJobRunning: false, hasFailed: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
-                     stopPolling();
-                }
-            } catch (error) {
-                addLog(`Polling error: ${(error as Error).message}`);
-                toast({ title: "Polling Error", description: "Could not get job status.", variant: "destructive" });
-                stopPolling();
-            }
-        }, 2500);
-    };
-    
-    useEffect(() => {
-        if (deleteJobState.isDeleteJobRunning && selectedProject) {
-            startPolling(selectedProject.siteId);
-        } else {
-            stopPolling();
-        }
-        return () => stopPolling();
-    }, [deleteJobState.isDeleteJobRunning, selectedProject]);
-    
-    useEffect(() => {
-        if (!selectedProject?.siteId) return;
-
-        setDeleteJobState({ isDeleteJobRunning: false, hasFailed: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
-        setLogs([]);
-
-        const checkInitialJobStatus = async () => {
-            try {
-                const response = await fetch('/api/headless-job-status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ siteId: selectedProject.siteId }),
-                });
-                const data = await response.json();
-                if (data.status === 'running') {
-                    addLog("Found a job already in progress. Resuming tracking...");
-                    const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
-                    setDeleteJobState({ isDeleteJobRunning: true, hasFailed: false, deleteProgress: {...data, progress: progressValue} });
-                } else if (data.status === 'error') {
-                    addLog(`Found a job that failed previously: ${data.step}`);
-                    setDeleteJobState({ isDeleteJobRunning: false, hasFailed: true, deleteProgress: data });
-                }
-            } catch (error) {
-                console.error("Could not check initial job status:", error);
-            }
-        };
-        checkInitialJobStatus();
-    }, [selectedProject]);
-    
-    
     const handleListAllMembers = async () => {
         if (!selectedProject?.siteId) return;
         setIsFetchingAllMembers(true);
@@ -219,71 +110,48 @@ const BulkDeletePage = () => {
     };
 
     const handleDeleteAllSelected = async () => {
-        if (selectedAllMembers.length === 0 || !selectedProject?.siteId) return;
+        if (selectedAllMembers.length === 0 || !selectedProject?.siteId) {
+            return;
+        }
 
-        setLogs([]);
-        addLog(`Starting deletion job for ${selectedAllMembers.length} members...`);
+        setIsDeleting(true);
+        setLogs([]); // Clear previous logs
+        addLog(`Starting deletion job for ${selectedAllMembers.length} members... Please wait, this may take some time.`);
 
         try {
             const membersToDelete = allMembers
                 .filter(member => selectedAllMembers.includes(member.id))
                 .map(member => ({ memberId: member.id, contactId: member.contactId }));
-            
-            const totalSteps = Math.ceil(membersToDelete.length / 100);
-            setDeleteJobState({
-                isDeleteJobRunning: true,
-                hasFailed: false,
-                deleteProgress: { processed: 0, total: totalSteps, step: 'Initializing job...', progress: 0 },
-            });
-            
+
+            // **THIS IS THE PROOF**: Log the exact count being sent to the backend.
+            console.log(`Sending ${membersToDelete.length} members to the backend for deletion.`);
+            addLog(`Sending ${membersToDelete.length} members to the backend...`);
+
             const response = await fetch('/api/headless-start-delete-job', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
             });
 
-            if (response.status !== 202) {
-                const data = await response.json();
-                throw new Error(data.message || `Failed to start job (Status: ${response.status})`);
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || result.message || "An unknown backend error occurred.");
             }
 
-            addLog("Job successfully started on the server. Polling for status...");
-            toast({ title: "Deletion Job Started", description: "The process is running in the background." });
+            addLog(`SUCCESS: ${result.message}`);
+            toast({ title: "Deletion Complete", description: result.message });
+            // Refresh the list to show the result
+            handleListAllMembers();
 
         } catch (error: any) {
-            addLog(`Error starting job: ${error.message}`);
-            toast({ title: "Error Starting Job", description: error.message, variant: "destructive" });
-            setDeleteJobState({ isDeleteJobRunning: false, hasFailed: true, deleteProgress: { processed: 0, total: 0, step: 'Failed to start', progress: 0 } });
+            addLog(`FATAL ERROR: ${error.message}`);
+            toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
+        } finally {
+            setIsDeleting(false);
         }
     };
-    
-    const handleResetJob = async () => {
-        if (!selectedProject?.siteId) return;
-        
-        stopPolling();
-        addLog("Attempting to reset job status on the server...");
 
-        try {
-            await fetch('/api/headless-reset-job', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId }),
-            });
-
-            setDeleteJobState({
-                isDeleteJobRunning: false,
-                hasFailed: false,
-                deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
-            });
-            setLogs(['[SYSTEM] Job status has been successfully reset. UI is unlocked.']);
-            toast({ title: "Job Reset", description: "The deletion job status has been cleared." });
-
-        } catch (error) {
-            addLog(`Error resetting job: ${(error as Error).message}`);
-            toast({ title: "Error", description: "Could not reset the job status.", variant: "destructive" });
-        }
-    };
-    
     const handleProjectChange = (siteId: string) => {
         const project = headlessProjects.find(p => p.siteId === siteId);
         if (project) {
@@ -292,14 +160,10 @@ const BulkDeletePage = () => {
             setSelectedAllMembers([]);
             setAllMembersFilterQuery("");
             setLogs([]);
-            setDeleteJobState({
-                isDeleteJobRunning: false,
-                hasFailed: false,
-                deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
-            });
+            setIsDeleting(false);
         }
     };
-
+    
     const filteredAllMembers = allMembers.filter(member =>
         member.profile?.nickname?.toLowerCase().includes(allMembersFilterQuery.toLowerCase()) ||
         member.loginEmail.toLowerCase().includes(allMembersFilterQuery.toLowerCase())
@@ -314,7 +178,7 @@ const BulkDeletePage = () => {
                         <Trash2 className="h-10 w-10 text-destructive" />
                         <div>
                             <h1 className="text-3xl font-bold">Bulk Delete Members</h1>
-                            <p className="text-muted-foreground">Select a project to manage and delete members in bulk.</p>
+                            <p className="text-muted-foreground">Select a project and load members to begin deletion.</p>
                         </div>
                     </div>
 
@@ -324,7 +188,7 @@ const BulkDeletePage = () => {
                             <Select 
                                 onValueChange={handleProjectChange} 
                                 value={selectedProject?.siteId || ""}
-                                disabled={deleteJobState.isDeleteJobRunning}
+                                disabled={isDeleting}
                             >
                                 <SelectTrigger>
                                     <SelectValue placeholder="Select a project..." />
@@ -337,34 +201,22 @@ const BulkDeletePage = () => {
                                     ))}
                                 </SelectContent>
                             </Select>
-                            <Button className="w-full sm:w-auto" onClick={handleListAllMembers} disabled={!selectedProject || isFetchingAllMembers || deleteJobState.isDeleteJobRunning}>
+                            <Button className="w-full sm:w-auto" onClick={handleListAllMembers} disabled={!selectedProject || isFetchingAllMembers || isDeleting}>
                                 <ListChecks className="mr-2 h-4 w-4" />
                                 {isFetchingAllMembers ? 'Loading...' : 'Load Members'}
                             </Button>
                         </CardContent>
                     </Card>
 
-                    {(deleteJobState.isDeleteJobRunning || deleteJobState.hasFailed || logs.length > 0) && (
-                        <Card className={`bg-gradient-card shadow-card ${deleteJobState.hasFailed ? 'border-destructive' : 'border-primary/10'}`}>
+                    {(isDeleting || logs.length > 0) && (
+                        <Card className="bg-gradient-card shadow-card border-primary/10">
                              <CardHeader>
                                 <CardTitle className="flex items-center gap-2">
-                                    {deleteJobState.hasFailed && <AlertTriangle className="h-5 w-5 text-destructive" />}
-                                    Bulk Deletion Status
+                                    <Terminal className="h-5 w-5" />
+                                    Deletion Job Status
                                 </CardTitle>
-                                {deleteJobState.deleteProgress.step && (
-                                     <CardDescription className={deleteJobState.hasFailed ? 'text-destructive' : ''}>
-                                        {deleteJobState.deleteProgress.step}
-                                    </CardDescription>
-                                )}
                             </CardHeader>
-                            <CardContent className="space-y-4">
-                                {deleteJobState.isDeleteJobRunning && (
-                                     <Progress value={deleteJobState.deleteProgress.progress || 0} />
-                                )}
-                                <div className="flex items-center gap-2">
-                                     <Terminal className="h-5 w-5 text-muted-foreground" />
-                                     <Label htmlFor="logs">Live Logs</Label>
-                                </div>
+                            <CardContent>
                                 <Textarea
                                     id="logs"
                                     ref={logContainerRef}
@@ -374,12 +226,6 @@ const BulkDeletePage = () => {
                                     placeholder="Logs will appear here..."
                                 />
                             </CardContent>
-                            <CardFooter>
-                                <Button variant="outline" onClick={handleResetJob}>
-                                    <RefreshCw className="mr-2 h-4 w-4" />
-                                    Reset/Unlock Job
-                                </Button>
-                            </CardFooter>
                         </Card>
                     )}
 
@@ -440,15 +286,15 @@ const BulkDeletePage = () => {
                                 <CardFooter>
                                     <AlertDialog>
                                         <AlertDialogTrigger asChild>
-                                            <Button variant="destructive" disabled={deleteJobState.isDeleteJobRunning}>
-                                                <Trash2 className="mr-2 h-4 w-4" />
-                                                {deleteJobState.isDeleteJobRunning ? 'Job in Progress...' : `Delete (${selectedAllMembers.length}) Selected`}
+                                            <Button variant="destructive" disabled={isDeleting}>
+                                                {isDeleting ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                                                {isDeleting ? 'Deleting...' : `Delete (${selectedAllMembers.length}) Selected`}
                                             </Button>
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
                                             <AlertDialogHeader>
                                                 <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                                <AlertDialogDescription>This will start a background job to permanently delete the selected {selectedAllMembers.length} members. This action cannot be undone.</AlertDialogDescription>
+                                                <AlertDialogDescription>This will permanently delete the selected {selectedAllMembers.length} members. This action cannot be undone and may take a while to complete.</AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
                                                 <AlertDialogCancel>Cancel</AlertDialogCancel>

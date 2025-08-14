@@ -13,92 +13,83 @@ function chunkArray(array, size) {
 async function getErrorDetails(response) {
     try {
         const parsed = await response.json();
-        // Wix permission errors often have a 'message' field
+        // The most common Wix error format
         if (parsed.message) {
             return `Wix API Error: ${parsed.message}`;
         }
-        return `A non-JSON error occurred: ${response.statusText}`;
+        // Fallback for other error structures
+        return `API Error: ${JSON.stringify(parsed)}`;
     } catch (e) {
-        return `Could not parse error response. Status: ${response.statusText}`;
+        // If the error response isn't JSON
+        const textResponse = await response.text();
+        return `An unknown error occurred. Status: ${response.status}. Response: ${textResponse}`;
     }
 }
 
 export async function onRequestPost(context) {
     const { request, env } = context;
     const { siteId, membersToDelete } = await request.json();
-    const jobKey = `delete_job_${siteId}`;
 
     try {
         const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
         if (!projectsJson) throw new Error("Could not retrieve project configurations.");
         
         const project = projectsJson.find(p => p.siteId === siteId);
-        if (!project) return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
+        if (!project) {
+            return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
+        }
 
-        const doBulkDeletion = async () => {
-            const memberChunks = chunkArray(membersToDelete, 100);
-            const totalSteps = memberChunks.length;
-            
-            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({
-                status: 'running', processed: 0, total: totalSteps, step: `Initializing deletion job...`
-            }));
-            await delay(500);
+        const memberChunks = chunkArray(membersToDelete, 100);
+        let membersDeletedCount = 0;
 
-            for (let i = 0; i < memberChunks.length; i++) {
-                const chunk = memberChunks[i];
-                const currentChunkNumber = i + 1;
-                const stepsCompleted = i + 1;
+        for (let i = 0; i < memberChunks.length; i++) {
+            const chunk = memberChunks[i];
+            const currentChunkNumber = i + 1;
+            const memberIdsInChunk = chunk.map(m => m.memberId).filter(Boolean);
 
-                await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({
-                    status: 'running', processed: stepsCompleted, total: totalSteps, step: `Step ${stepsCompleted}/${totalSteps}: Deleting member batch ${currentChunkNumber}...`
-                }));
+            if (memberIdsInChunk.length > 0) {
+                const response = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
+                    method: 'POST',
+                    headers: { 
+                        'Authorization': project.apiKey, 
+                        'wix-site-id': project.siteId, 
+                        'Content-Type': 'application/json' 
+                    },
+                    body: JSON.stringify({ "memberIds": memberIdsInChunk })
+                });
 
-                const memberIdsInChunk = chunk.map(m => m.memberId).filter(Boolean);
-
-                if (memberIdsInChunk.length > 0) {
-                    try {
-                        const response = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
-                            method: 'POST',
-                            headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ "memberIds": memberIdsInChunk })
-                        });
-
-                        if (!response.ok) {
-                            // This is the critical check. If the API returns an error, we stop.
-                            const errorDetails = await getErrorDetails(response);
-                            throw new Error(`Permission Denied or API Error on batch ${currentChunkNumber}. Please check your API Key permissions. Details: ${errorDetails}`);
-                        }
-
-                    } catch (e) {
-                        const errorState = {
-                            status: 'error',
-                            processed: stepsCompleted,
-                            total: totalSteps,
-                            step: e.message
-                        };
-                        await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify(errorState));
-                        console.error("Halting job due to error:", e.message);
-                        return; // Stop the entire background process
-                    }
+                if (!response.ok) {
+                    const errorDetails = await getErrorDetails(response);
+                    // If any batch fails, we stop immediately and return an error.
+                    throw new Error(`Job failed on batch ${currentChunkNumber}. **Please check your API Key has 'Manage Members (Full Permissions)'**. Details: ${errorDetails}`);
                 }
                 
-                await delay(1000); // Wait 1 second before the next chunk
+                // If successful, update our counter
+                membersDeletedCount += memberIdsInChunk.length;
             }
+            
+            // Wait 1 second before processing the next chunk to avoid rate limiting.
+            await delay(1000); 
+        }
 
-            await env.WIX_HEADLESS_CONFIG.put(jobKey, JSON.stringify({
-                status: 'complete', processed: totalSteps, total: totalSteps, step: 'All members successfully deleted!'
-            }));
-        };
-        
-        context.waitUntil(doBulkDeletion());
-
-        return new Response(JSON.stringify({ success: true, message: "Bulk member deletion job started." }), {
-            status: 202, headers: { 'Content-Type': 'application/json' },
+        // If the loop completes without throwing an error, it was successful.
+        return new Response(JSON.stringify({ 
+            success: true, 
+            message: `Successfully deleted ${membersDeletedCount} members.` 
+        }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
         });
 
     } catch (e) {
-        return new Response(JSON.stringify({ message: 'An error occurred during job initialization.', error: e.message }), {
-            status: 500, headers: { 'Content-Type': 'application/json' },
+        // Catch any errors from the loop or initial setup.
+        return new Response(JSON.stringify({ 
+            success: false, 
+            message: 'A critical error occurred during the deletion process.', 
+            error: e.message 
+        }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
         });
     }
 }
