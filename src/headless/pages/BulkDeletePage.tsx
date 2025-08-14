@@ -20,18 +20,22 @@ interface HeadlessProject {
   projectName: string;
   siteId: string;
   apiKey: string;
+  ownerEmail?: string;
 }
 
 interface Member {
   id: string;
   loginEmail: string;
   contactId: string;
-  profile: { nickname: string; };
+  profile: {
+    nickname: string;
+  };
   status?: string;
 }
 
 export interface DeleteJobState {
     isDeleteJobRunning: boolean;
+    hasFailed: boolean;
     deleteProgress: {
         processed: number;
         total: number;
@@ -66,6 +70,7 @@ const BulkDeletePage = () => {
     const [allMembersFilterQuery, setAllMembersFilterQuery] = useState("");
     const [deleteJobState, setDeleteJobState] = useState<DeleteJobState>({
         isDeleteJobRunning: false,
+        hasFailed: false,
         deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
     });
     const [logs, setLogs] = useState<string[]>([]);
@@ -126,38 +131,28 @@ const BulkDeletePage = () => {
 
                 const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
                 
-                // Always update progress
-                setDeleteJobState(prevState => ({
-                    ...prevState,
-                    deleteProgress: { ...prevState.deleteProgress, ...data, progress: progressValue }
-                }));
-                
-                // Add log only if step message has changed
                 if (data.step && data.step !== deleteJobState.deleteProgress.step) {
                     addLog(data.step);
                 }
 
                 if (data.status === 'running') {
-                    setDeleteJobState({ isDeleteJobRunning: true, deleteProgress: { ...data, progress: progressValue }});
+                    setDeleteJobState({ isDeleteJobRunning: true, hasFailed: false, deleteProgress: { ...data, progress: progressValue }});
                 } else if (data.status === 'complete') {
-                    addLog("Job completed successfully!");
                     toast({ title: "Bulk delete complete!", description: `Successfully processed member deletions.` });
                     stopPolling();
-                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...data, progress: 100 }});
+                    setDeleteJobState({ isDeleteJobRunning: false, hasFailed: false, deleteProgress: { ...data, progress: 100 }});
                     handleListAllMembers();
                 } else if (data.status === 'error') {
-                    addLog(`ERROR: ${data.step}`);
-                    toast({ title: "Job Failed", description: "The deletion job encountered an error. Check logs for details.", variant: "destructive" });
+                    toast({ title: "Job Failed", description: "The deletion job encountered an error.", variant: "destructive" });
                     stopPolling();
-                    setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { ...data, progress: progressValue }});
+                    setDeleteJobState({ isDeleteJobRunning: false, hasFailed: true, deleteProgress: { ...data, progress: progressValue }});
                 } else if (data.status === 'idle') {
-                     addLog("Job is idle. Stopping polling.");
-                     setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
+                     setDeleteJobState({ isDeleteJobRunning: false, hasFailed: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
                      stopPolling();
                 }
             } catch (error) {
                 addLog(`Polling error: ${(error as Error).message}`);
-                toast({ title: "Polling Error", description: "Could not get job status. You may need to reset it.", variant: "destructive" });
+                toast({ title: "Polling Error", description: "Could not get job status.", variant: "destructive" });
                 stopPolling();
             }
         }, 2500);
@@ -175,7 +170,7 @@ const BulkDeletePage = () => {
     useEffect(() => {
         if (!selectedProject?.siteId) return;
 
-        setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
+        setDeleteJobState({ isDeleteJobRunning: false, hasFailed: false, deleteProgress: { processed: 0, total: 0, step: '', progress: 0 } });
         setLogs([]);
 
         const checkInitialJobStatus = async () => {
@@ -189,7 +184,10 @@ const BulkDeletePage = () => {
                 if (data.status === 'running') {
                     addLog("Found a job already in progress. Resuming tracking...");
                     const progressValue = data.total > 0 ? (data.processed / data.total) * 100 : 0;
-                    setDeleteJobState({ isDeleteJobRunning: true, deleteProgress: {...data, progress: progressValue} });
+                    setDeleteJobState({ isDeleteJobRunning: true, hasFailed: false, deleteProgress: {...data, progress: progressValue} });
+                } else if (data.status === 'error') {
+                    addLog(`Found a job that failed previously: ${data.step}`);
+                    setDeleteJobState({ isDeleteJobRunning: false, hasFailed: true, deleteProgress: data });
                 }
             } catch (error) {
                 console.error("Could not check initial job status:", error);
@@ -221,10 +219,7 @@ const BulkDeletePage = () => {
     };
 
     const handleDeleteAllSelected = async () => {
-        if (selectedAllMembers.length === 0 || !selectedProject?.siteId) {
-            toast({ title: "No members selected or project not found", variant: "destructive" });
-            return;
-        }
+        if (selectedAllMembers.length === 0 || !selectedProject?.siteId) return;
 
         setLogs([]);
         addLog(`Starting deletion job for ${selectedAllMembers.length} members...`);
@@ -232,14 +227,12 @@ const BulkDeletePage = () => {
         try {
             const membersToDelete = allMembers
                 .filter(member => selectedAllMembers.includes(member.id))
-                .map(member => ({
-                    memberId: member.id,
-                    contactId: member.contactId,
-                }));
+                .map(member => ({ memberId: member.id, contactId: member.contactId }));
             
             const totalSteps = Math.ceil(membersToDelete.length / 100);
             setDeleteJobState({
                 isDeleteJobRunning: true,
+                hasFailed: false,
                 deleteProgress: { processed: 0, total: totalSteps, step: 'Initializing job...', progress: 0 },
             });
             
@@ -260,7 +253,7 @@ const BulkDeletePage = () => {
         } catch (error: any) {
             addLog(`Error starting job: ${error.message}`);
             toast({ title: "Error Starting Job", description: error.message, variant: "destructive" });
-            setDeleteJobState({ isDeleteJobRunning: false, deleteProgress: { processed: 0, total: 0, step: 'Failed to start', progress: 0 } });
+            setDeleteJobState({ isDeleteJobRunning: false, hasFailed: true, deleteProgress: { processed: 0, total: 0, step: 'Failed to start', progress: 0 } });
         }
     };
     
@@ -271,21 +264,18 @@ const BulkDeletePage = () => {
         addLog("Attempting to reset job status on the server...");
 
         try {
-            const response = await fetch('/api/headless-reset-job', {
+            await fetch('/api/headless-reset-job', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ siteId: selectedProject.siteId }),
             });
 
-            if (!response.ok) {
-                throw new Error("Server failed to reset the job.");
-            }
-
             setDeleteJobState({
                 isDeleteJobRunning: false,
-                deleteProgress: { processed: 0, total: 0, step: 'Job reset.', progress: 0 },
+                hasFailed: false,
+                deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
             });
-            setLogs(['Job status has been successfully reset. UI is unlocked.']);
+            setLogs(['[SYSTEM] Job status has been successfully reset. UI is unlocked.']);
             toast({ title: "Job Reset", description: "The deletion job status has been cleared." });
 
         } catch (error) {
@@ -304,6 +294,7 @@ const BulkDeletePage = () => {
             setLogs([]);
             setDeleteJobState({
                 isDeleteJobRunning: false,
+                hasFailed: false,
                 deleteProgress: { processed: 0, total: 0, step: '', progress: 0 },
             });
         }
@@ -353,12 +344,15 @@ const BulkDeletePage = () => {
                         </CardContent>
                     </Card>
 
-                    {(deleteJobState.isDeleteJobRunning || logs.length > 0) && (
-                        <Card className="bg-gradient-card shadow-card border-primary/10">
+                    {(deleteJobState.isDeleteJobRunning || deleteJobState.hasFailed || logs.length > 0) && (
+                        <Card className={`bg-gradient-card shadow-card ${deleteJobState.hasFailed ? 'border-destructive' : 'border-primary/10'}`}>
                              <CardHeader>
-                                <CardTitle>Bulk Deletion Status</CardTitle>
+                                <CardTitle className="flex items-center gap-2">
+                                    {deleteJobState.hasFailed && <AlertTriangle className="h-5 w-5 text-destructive" />}
+                                    Bulk Deletion Status
+                                </CardTitle>
                                 {deleteJobState.deleteProgress.step && (
-                                     <CardDescription className={deleteJobState.deleteProgress.step?.includes('failed') ? 'text-destructive' : ''}>
+                                     <CardDescription className={deleteJobState.hasFailed ? 'text-destructive' : ''}>
                                         {deleteJobState.deleteProgress.step}
                                     </CardDescription>
                                 )}
