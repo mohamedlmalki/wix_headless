@@ -35,6 +35,7 @@ async function fetchAllMembers(project) {
   return allMembers;
 }
 
+// Fetches all contributors (admins, owners, etc.) for a site
 async function getContributorContactIds(project) {
     const contactIds = new Set();
     try {
@@ -76,7 +77,7 @@ export async function onRequestPost({ request, env }) {
         getContributorContactIds(project)
     ]);
 
-    // Filter out any member whose contactId matches a contributor's contactId
+    // Filter out any member whose contactId matches a known contributor's contactId
     const filteredMembers = allMembers.filter(member => !contributorContactIds.includes(member.contactId));
 
     return new Response(JSON.stringify({ members: filteredMembers }), {
