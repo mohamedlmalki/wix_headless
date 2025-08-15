@@ -12,7 +12,6 @@ import Navbar from "@/components/Navbar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface HeadlessProject {
   projectName: string;
@@ -33,9 +32,6 @@ interface LogEntry {
     type: string;
     status: string;
     details: string;
-    batch?: number;
-    members?: Member[];
-    contactResults?: { email: string; status: string; error?: string }[];
 }
 
 const BulkDeletePage = () => {
@@ -73,7 +69,7 @@ const BulkDeletePage = () => {
         setIsLoading(true);
         setMembers([]);
         setSelectedMembers([]);
-        setLogs([]);
+        setLogs([]); // Clear logs when starting a new load
         try {
             const response = await fetch(`/api/headless-bulk-operations`, {
                 method: 'POST',
@@ -82,7 +78,7 @@ const BulkDeletePage = () => {
             });
 
             const data = await response.json();
-            setLogs(data.logs || []);
+            setLogs(data.logs || []); // Display logs from the loading process
             if (!response.ok) throw new Error(data.error || 'Failed to load members.');
             
             setMembers(data.members || []);
@@ -142,7 +138,7 @@ const BulkDeletePage = () => {
     );
 
     const getStatusColor = (status: string) => {
-        if (status.includes('SUCCESS') || status.includes('COMPLETED')) return 'text-green-500';
+        if (status.includes('SUCCESS')) return 'text-green-500';
         if (status.includes('FAILED') || status.includes('ERROR')) return 'text-red-500';
         if (status.includes('WARNING') || status.includes('SKIPPED')) return 'text-yellow-500';
         return 'text-muted-foreground';
@@ -153,7 +149,6 @@ const BulkDeletePage = () => {
             <Navbar />
             <div className="container mx-auto px-4 pt-24 pb-12">
                 <div className="max-w-4xl mx-auto space-y-8">
-                    {/* Header and Project Selection */}
                     <div className="flex items-center gap-4 animate-fade-in">
                         <Trash2 className="h-10 w-10 text-destructive" />
                         <div>
@@ -212,7 +207,7 @@ const BulkDeletePage = () => {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {isLoading && !isDeleting ? (
+                                        {isLoading ? (
                                             <TableRow><TableCell colSpan={4} className="h-24 text-center">Loading members...</TableCell></TableRow>
                                         ) : filteredMembers.length > 0 ? (
                                             filteredMembers.map(member => (
@@ -264,45 +259,30 @@ const BulkDeletePage = () => {
                             )}
                         </CardFooter>
                     </Card>
-                    {/* ★★★ NEW ACCORDION LOG DISPLAY ★★★ */}
                     {logs.length > 0 && (
                          <Card>
                             <CardHeader><CardTitle>Operation Logs</CardTitle></CardHeader>
-                            <CardContent>
-                                <Accordion type="multiple" className="w-full">
-                                    {logs.map((log, i) => (
-                                        <AccordionItem value={`log-${i}`} key={i}>
-                                            <AccordionTrigger className="text-sm">
-                                                <div className="flex items-center gap-4 w-full">
-                                                    <span className={getStatusColor(log.status)}>
-                                                        <Badge variant={log.status.includes('SUCCESS') || log.status.includes('COMPLETED') ? 'default' : log.status.includes('FAILED') || log.status.includes('ERROR') ? 'destructive' : 'secondary'}>
-                                                            {log.status}
-                                                        </Badge>
-                                                    </span>
-                                                    <span>{log.type}{log.batch ? ` - Batch ${log.batch}` : ''}</span>
-                                                    <span className="flex-1 text-right text-muted-foreground text-xs pr-2">{log.details}</span>
-                                                </div>
-                                            </AccordionTrigger>
-                                            <AccordionContent>
-                                                {log.members && log.members.length > 0 && (
-                                                    <div className="max-h-40 overflow-y-auto p-2 border rounded-md">
-                                                        <Table>
-                                                            <TableHeader><TableRow><TableHead>Email</TableHead></TableRow></TableHeader>
-                                                            <TableBody>
-                                                                {log.members.map(member => (
-                                                                    <TableRow key={member.id}><TableCell className="text-xs">{member.loginEmail}</TableCell></TableRow>
-                                                                ))}
-                                                            </TableBody>
-                                                        </Table>
-                                                    </div>
-                                                )}
-                                                {!log.members && (
-                                                    <p className="text-xs text-muted-foreground p-2">No specific members associated with this log entry.</p>
-                                                )}
-                                            </AccordionContent>
-                                        </AccordionItem>
-                                    ))}
-                                </Accordion>
+                            <CardContent className="max-h-80 overflow-y-auto">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Step</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead>Details</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {logs.map((log, i) => (
+                                            <TableRow key={i}>
+                                                <TableCell>{log.type}</TableCell>
+                                                <TableCell className={getStatusColor(log.status)}>
+                                                    <Badge variant={log.status.includes('SUCCESS') ? 'default' : log.status.includes('FAILED') ? 'destructive' : 'secondary'}>{log.status}</Badge>
+                                                </TableCell>
+                                                <TableCell className="text-xs">{log.details}</TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
                             </CardContent>
                         </Card>
                     )}
