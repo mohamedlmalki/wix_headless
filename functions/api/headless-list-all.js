@@ -84,6 +84,7 @@ export async function onRequestPost({ request, env }) {
     // Filter out any member whose contactId matches a known contributor's contactId
     const filteredMembers = allMembers.filter(member => !contributorContactIds.includes(member.contactId));
 
+    // Return the filtered list AND the owner's contact ID
     return new Response(JSON.stringify({ members: filteredMembers, ownerContactId }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

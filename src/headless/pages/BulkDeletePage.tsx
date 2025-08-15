@@ -1,6 +1,6 @@
 // src/headless/pages/BulkDeletePage.tsx
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -74,7 +74,7 @@ const BulkDeletePage = () => {
         fetchProjects();
     }, []);
 
-    // When a project is selected, fetch its members and owner info
+    // When a project is selected, fetch its members
     useEffect(() => {
         if (selectedProject) {
             handleLoadMembers();
@@ -95,6 +95,7 @@ const BulkDeletePage = () => {
             if (!response.ok) throw new Error('Failed to load members.');
             const data = await response.json();
             setMembers(data.members || []);
+            // Set the owner contact ID from the response
             setOwnerContactId(data.ownerContactId || null);
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -121,7 +122,7 @@ const BulkDeletePage = () => {
             });
 
             const result = await response.json();
-            setLogs(result.logs || [{ type: 'Member Deletion', batch: 1, status: 'ERROR', details: 'No logs returned from server.' }]);
+            setLogs(result.logs || []);
             
             if (!response.ok || !result.success) {
                 throw new Error(result.error || 'Deletion job failed.');
