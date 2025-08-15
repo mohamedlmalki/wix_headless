@@ -2,7 +2,7 @@
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Helper function to make a generic, authenticated request to the Wix API
+// Helper to make a generic, authenticated request to the Wix API
 const makeWixApiRequest = async (url, project, method = 'GET', body = null) => {
     const options = {
         method: method,
@@ -23,25 +23,46 @@ const makeWixApiRequest = async (url, project, method = 'GET', body = null) => {
     return responseData;
 };
 
-// Helper function to get the Owner's Member ID using the documented API
-const getOwnerMemberId = async (project) => {
-    const contributorsUrl = 'https://www.wixapis.com/roles-management/v2/contributors/query';
-    const body = {
-        query: {
-            // This filter specifically asks for the site owner role
-            filter: { policyIds: ["wix.platform.roles.owner"] }
-        }
-    };
-    const data = await makeWixApiRequest(contributorsUrl, project, 'POST', body);
-    
-    if (data.contributors && data.contributors.length > 0) {
-        // As you discovered, the accountId from this response is the memberId
-        return data.contributors[0].accountId;
-    }
-    console.warn(`Could not find an owner for siteId: ${project.siteId}`);
-    return null;
-};
+// ★★★ ROBUST HELPER FUNCTION WITH FALLBACK ★★★
+const getOwnerInfo = async (project, allMembers) => {
+    let ownerMemberId = null;
 
+    // 1. Primary Method: Try the official contributors API first.
+    try {
+        const contributorsUrl = 'https://www.wixapis.com/roles-management/v2/contributors/query';
+        const body = { query: { filter: { policyIds: ["wix.platform.roles.owner"] } } };
+        const data = await makeWixApiRequest(contributorsUrl, project, 'POST', body);
+        if (data.contributors && data.contributors.length > 0) {
+            ownerMemberId = data.contributors[0].accountId;
+        }
+    } catch (error) {
+        console.warn(`Could not fetch owner via contributors API (likely missing permissions). Falling back to ownerEmail. Error: ${error.message}`);
+        ownerMemberId = null; // Ensure it's null if the API fails
+    }
+
+    // 2. Find the owner's contactId using their memberId or fallback to ownerEmail
+    let ownerContactId = null;
+    if (ownerMemberId) {
+        const owner = allMembers.find(m => m.id === ownerMemberId);
+        if (owner) {
+            ownerContactId = owner.contactId;
+        }
+    } 
+    // 3. Fallback Method: If the primary method failed, use the reliable ownerEmail from config.
+    else if (project.ownerEmail) {
+        const owner = allMembers.find(m => m.loginEmail.toLowerCase() === project.ownerEmail.toLowerCase());
+        if (owner) {
+            ownerContactId = owner.contactId;
+            console.log(`Successfully identified owner via fallback email: ${project.ownerEmail}`);
+        } else {
+             console.warn(`Owner email "${project.ownerEmail}" from config was not found in the member list.`);
+        }
+    } else {
+        console.warn("No owner could be identified. Protection is limited.");
+    }
+
+    return { ownerContactId };
+};
 
 // Main Handler
 export async function onRequestPost({ request, env }) {
@@ -54,18 +75,14 @@ export async function onRequestPost({ request, env }) {
         const project = projectsJson.find(p => p.siteId === siteId);
         if (!project) return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
 
-        // --- ACTION: LIST MEMBERS (Now the primary and safe way to get members) ---
+        // --- ACTION: LIST MEMBERS ---
         if (action === 'list') {
-            const ownerMemberId = await getOwnerMemberId(project);
-            
-            const membersUrl = 'https://www.wixapis.com/members/v1/members?fieldsets=FULL&paging.limit=1000';
-            const allMembersData = await makeWixApiRequest(membersUrl, project, 'GET');
+            const allMembersUrl = 'https://www.wixapis.com/members/v1/members?fieldsets=FULL&paging.limit=1000';
+            const allMembersData = await makeWixApiRequest(allMembersUrl, project, 'GET');
             const allMembers = allMembersData.members || [];
             
-            const owner = ownerMemberId ? allMembers.find(m => m.id === ownerMemberId) : null;
-            const ownerContactId = owner ? owner.contactId : null;
-
-            // Securely filter out the owner before sending the list to the frontend
+            const { ownerContactId } = await getOwnerInfo(project, allMembers);
+            
             const filteredMembers = ownerContactId 
                 ? allMembers.filter(m => m.contactId !== ownerContactId)
                 : allMembers;
@@ -75,15 +92,18 @@ export async function onRequestPost({ request, env }) {
             });
         }
 
-        // --- ACTION: DELETE MEMBERS (With final server-side protection) ---
+        // --- ACTION: DELETE MEMBERS ---
         if (action === 'delete') {
             const logs = [];
-
-            // Final safety check: re-fetch the owner ID to ensure nothing has changed
-            const ownerMemberId = await getOwnerMemberId(project);
             
+            const allMembersUrl = 'https://www.wixapis.com/members/v1/members?fieldsets=FULL&paging.limit=1000';
+            const allMembersData = await makeWixApiRequest(allMembersUrl, project, 'GET');
+            const allMembers = allMembersData.members || [];
+
+            const { ownerContactId } = await getOwnerInfo(project, allMembers);
+
             const safeMembersToDelete = membersToDelete.filter(member => {
-                if (ownerMemberId && member.id === ownerMemberId) {
+                if (ownerContactId && member.contactId === ownerContactId) {
                     logs.push({ type: 'Protection', batch: 0, status: 'SKIPPED', details: `Site owner was in the request but was skipped for protection.` });
                     return false;
                 }
@@ -96,14 +116,12 @@ export async function onRequestPost({ request, env }) {
                 });
             }
 
-            // Step 1: Bulk delete member profiles
             const memberIdsToDelete = safeMembersToDelete.map(m => m.id);
             await makeWixApiRequest('https://www.wixapis.com/members/v1/members/bulk/delete', project, 'POST', { member_ids: memberIdsToDelete });
             logs.push({ type: 'Member Profile Deletion', batch: 1, status: 'SUCCESS', details: `Successfully deleted ${memberIdsToDelete.length} member profiles.` });
 
-            await delay(1000); // Small delay for Wix to process
+            await delay(1000);
 
-            // Step 2: Delete associated contacts and log each result
             const contactResults = [];
             for (const member of safeMembersToDelete) {
                 const contactUrl = `https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`;
