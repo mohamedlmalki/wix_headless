@@ -17,7 +17,8 @@ async function fetchAllMembers(project) {
     });
 
     if (!response.ok) {
-      throw new Error(`Wix API error while fetching members: ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(`Wix API error while fetching members: ${errorText}`);
     }
     const data = await response.json();
     
@@ -34,8 +35,8 @@ async function fetchAllMembers(project) {
   return allMembers;
 }
 
-async function getContributorMemberIds(project) {
-    const contributorMemberIds = new Set();
+async function getContributorContactIds(project) {
+    const contactIds = new Set();
     try {
         const contributorsUrl = `https://www.wixapis.com/sites/v1/sites/${project.siteId}/contributors`;
         const contributorsResponse = await fetch(contributorsUrl, {
@@ -49,28 +50,14 @@ async function getContributorMemberIds(project) {
         
         const { contributors } = await contributorsResponse.json();
         if (contributors) {
-            for (const contributor of contributors) {
-                // Find the member ID associated with the contributor's email
-                const memberQueryUrl = 'https://www.wixapis.com/members/v1/members/query';
-                const memberQueryBody = JSON.stringify({ query: { filter: { loginEmail: contributor.email } } });
-                const memberResponse = await fetch(memberQueryUrl, {
-                    method: 'POST',
-                    headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
-                    body: memberQueryBody,
-                });
-
-                if (memberResponse.ok) {
-                    const { members } = await memberResponse.json();
-                    if (members && members.length > 0) {
-                        contributorMemberIds.add(members[0].id);
-                    }
-                }
-            }
+            contributors.forEach(c => {
+                if(c.contactId) contactIds.add(c.contactId);
+            });
         }
     } catch (error) {
-        console.error("Failed to get contributor member IDs, proceeding without this filter.", error);
+        console.error("Failed to get contributor contact IDs, proceeding without this filter.", error);
     }
-    return Array.from(contributorMemberIds);
+    return Array.from(contactIds);
 }
 
 export async function onRequestPost({ request, env }) {
@@ -84,13 +71,13 @@ export async function onRequestPost({ request, env }) {
       return new Response(JSON.stringify({ message: `Project not found for siteId: ${siteId}` }), { status: 404 });
     }
 
-    const [allMembers, contributorIds] = await Promise.all([
+    const [allMembers, contributorContactIds] = await Promise.all([
         fetchAllMembers(project),
-        getContributorMemberIds(project)
+        getContributorContactIds(project)
     ]);
 
-    // Filter out any member who is also a site contributor
-    const filteredMembers = allMembers.filter(member => !contributorIds.includes(member.id));
+    // Filter out any member whose contactId matches a contributor's contactId
+    const filteredMembers = allMembers.filter(member => !contributorContactIds.includes(member.contactId));
 
     return new Response(JSON.stringify({ members: filteredMembers }), {
       status: 200,
@@ -98,6 +85,6 @@ export async function onRequestPost({ request, env }) {
     });
 
   } catch (e) {
-    return new Response(JSON.stringify({ message: 'An error occurred.', error: e.message }), { status: 500 });
+    return new Response(JSON.stringify({ message: 'An error occurred during member listing.', error: e.message }), { status: 500 });
   }
 }

@@ -1,17 +1,20 @@
 // src/headless/pages/BulkDeletePage.tsx
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
-import { Trash2, RefreshCw, Download, ListChecks, Terminal } from "lucide-react";
-import Navbar from '@/components/Navbar';
 import { Checkbox } from "@/components/ui/checkbox";
+import { toast } from "@/hooks/use-toast";
+import { Trash2, RefreshCw, Ban } from "lucide-react";
+import Navbar from "@/components/Navbar";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { useToast } from "@/hooks/use-toast";
+import { Progress } from "@/components/ui/progress";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface HeadlessProject {
   projectName: string;
@@ -28,45 +31,30 @@ interface Member {
   status?: string;
 }
 
-const exportEmailsToTxt = (data: Member[], filename: string) => {
-    const emails = data.map(row => row.loginEmail).filter(Boolean);
-    if (emails.length === 0) {
-        alert("No emails to export.");
-        return;
-    }
-    const txtContent = emails.join('\n');
-    const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${filename}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-};
+interface LogEntry {
+    type: 'Member Deletion' | 'Contact Deletion';
+    batch: number;
+    status: 'SUCCESS' | 'ERROR' | 'PARTIAL_SUCCESS';
+    details: string;
+    contactResults?: { email: string; status: 'SUCCESS' | 'ERROR'; error?: string }[];
+}
 
 const BulkDeletePage = () => {
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | null>(null);
-    const [allMembers, setAllMembers] = useState<Member[]>([]);
-    const [isFetchingAllMembers, setIsFetchingAllMembers] = useState(false);
-    const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
-    const [filterQuery, setFilterQuery] = useState("");
+    const [ownerContactId, setOwnerContactId] = useState<string | null>(null);
+    const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+    const [members, setMembers] = useState<Member[]>([]);
+    const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
+    const [filter, setFilter] = useState("");
+
+    // Job State Management
     const [isDeleting, setIsDeleting] = useState(false);
-    const [logs, setLogs] = useState<string[]>([]);
-    const { toast } = useToast();
-    const logContainerRef = useRef<HTMLTextAreaElement>(null);
-
-    useEffect(() => {
-        if (logContainerRef.current) {
-            logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
-        }
-    }, [logs]);
-
-    const addLog = (message: string) => {
-        const timestamp = new Date().toLocaleTimeString();
-        setLogs(prevLogs => [...prevLogs, `[${timestamp}] ${message}`]);
-    };
-
+    const [deletionProgress, setDeletionProgress] = useState(0);
+    const [deletionStatus, setDeletionStatus] = useState("");
+    const [logs, setLogs] = useState<LogEntry[]>([]);
+    const jobCancelled = useRef(false);
+    
     useEffect(() => {
         const fetchProjects = async () => {
             try {
@@ -74,59 +62,78 @@ const BulkDeletePage = () => {
                 if (response.ok) {
                     const projects = await response.json();
                     setHeadlessProjects(projects);
-                    if (projects.length > 0 && !selectedProject) {
+                    if (projects.length > 0) {
                         setSelectedProject(projects[0]);
                     }
                 }
             } catch (error) {
-                const errorMessage = `Error loading projects: ${(error as Error).message}`;
-                addLog(errorMessage);
                 toast({ title: "Error", description: "Could not load projects.", variant: "destructive" });
             }
         };
         fetchProjects();
-    }, [toast, selectedProject]);
+    }, []);
 
-    const handleListAllMembers = async () => {
-        if (!selectedProject?.siteId) return;
-        setIsFetchingAllMembers(true);
-        setAllMembers([]);
-        setSelectedMemberIds([]);
+    const fetchOwnerId = async (siteId: string) => {
+        if (!siteId) return;
         try {
-            const response = await fetch('/api/headless-list-all', {
+            // This assumes an endpoint exists to get the owner. 
+            // Based on your files, this logic needs to be implemented in your backend.
+            // For now, we'll simulate not finding it.
+            console.warn("Owner detection logic needs a backend endpoint.");
+            setOwnerContactId(null);
+        } catch (error) {
+            toast({ title: "Failed to identify site owner.", description: "Owner contact will not be protected from deletion.", variant: "destructive"});
+            setOwnerContactId(null);
+        }
+    };
+    
+    useEffect(() => {
+        if (selectedProject) {
+            fetchOwnerId(selectedProject.siteId);
+            handleLoadMembers();
+        }
+    }, [selectedProject]);
+
+
+    const handleLoadMembers = async () => {
+        if (!selectedProject) return;
+        setIsLoadingMembers(true);
+        setMembers([]);
+        setSelectedMembers([]);
+        try {
+            const response = await fetch(`/api/headless-list-all`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ siteId: selectedProject.siteId }),
             });
+
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to fetch the member list.');
+                throw new Error(errorData.message || 'Failed to load members.');
             }
+
             const data = await response.json();
-            setAllMembers(data.members || []);
-        } catch (error) {
-            toast({ title: "Error", description: (error as Error).message, variant: "destructive" });
+            setMembers(data.members || []);
+            toast({ title: "Success", description: `Successfully loaded ${data.members?.length || 0} members.` });
+
+        } catch (error: any) {
+             toast({ title: "Failed to load members.", description: error.message, variant: "destructive" });
         } finally {
-            setIsFetchingAllMembers(false);
+            setIsLoadingMembers(false);
         }
     };
-
-    const handleDeleteSelected = async () => {
-        if (selectedMemberIds.length === 0 || !selectedProject?.siteId) {
-            return;
-        }
-
+    
+    const handleStartDeletion = async () => {
+        if (selectedMembers.length === 0 || !selectedProject) return;
+        
+        jobCancelled.current = false;
         setIsDeleting(true);
         setLogs([]);
-        addLog(`Starting deletion job for ${selectedMemberIds.length} members. This may take some time.`);
-
+        setDeletionProgress(0);
+        
+        const membersToDelete = members.filter(m => selectedMembers.includes(m.id));
+        
         try {
-            const membersToDelete = allMembers
-                .filter(member => selectedMemberIds.includes(member.id))
-                .map(member => ({ memberId: member.id, contactId: member.contactId }));
-            
-            addLog(`Sending ${membersToDelete.length} members to the backend for deletion...`);
-
             const response = await fetch('/api/headless-start-delete-job', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -135,49 +142,48 @@ const BulkDeletePage = () => {
 
             const result = await response.json();
 
-            if (!response.ok || !result.success) {
-                throw new Error(result.error || result.message || "An unknown backend error occurred during deletion.");
+            if (!response.ok) {
+                throw new Error(result.error || result.message || 'An unknown error occurred.');
             }
-
-            addLog(`SUCCESS: ${result.message}`);
-            toast({ title: "Deletion Complete", description: result.message });
             
-            // Refresh the member list after deletion
-            handleListAllMembers();
-            setSelectedMemberIds([]);
+            setLogs(result.logs || []);
+            setDeletionProgress(100);
+            setDeletionStatus("Deletion process completed.");
+            toast({ title: "Job Finished", description: `Processed ${membersToDelete.length} members.` });
 
-        } catch (error: any) {
-            addLog(`FATAL ERROR: ${error.message}`);
+        } catch(error: any) {
             toast({ title: "Deletion Failed", description: error.message, variant: "destructive" });
+            setDeletionStatus(`Error: ${error.message}`);
         } finally {
             setIsDeleting(false);
-        }
-    };
-
-    const handleProjectChange = (siteId: string) => {
-        const project = headlessProjects.find(p => p.siteId === siteId);
-        if (project) {
-            setSelectedProject(project);
-            setAllMembers([]);
-            setSelectedMemberIds([]);
-            setFilterQuery("");
-            setLogs([]);
+            handleLoadMembers(); // Refresh list
         }
     };
     
-    const filteredAllMembers = allMembers.filter(member =>
-        member.profile?.nickname?.toLowerCase().includes(filterQuery.toLowerCase()) ||
-        member.loginEmail.toLowerCase().includes(filterQuery.toLowerCase())
-    );
+    const handleCancelJob = () => {
+        jobCancelled.current = true;
+    };
 
     const handleSelectAll = (checked: boolean) => {
         if (checked) {
-            const allIds = filteredAllMembers.map(m => m.id);
-            setSelectedMemberIds(allIds);
+            setSelectedMembers(filteredMembers.filter(m => m.contactId !== ownerContactId).map(m => m.id));
         } else {
-            setSelectedMemberIds([]);
+            setSelectedMembers([]);
         }
     };
+
+    const handleSelectMember = (memberId: string, checked: boolean) => {
+        if (checked) {
+            setSelectedMembers(prev => [...prev, memberId]);
+        } else {
+            setSelectedMembers(prev => prev.filter(id => id !== memberId));
+        }
+    };
+
+    const filteredMembers = members.filter(member =>
+        member.profile?.nickname?.toLowerCase().includes(filter.toLowerCase()) ||
+        member.loginEmail?.toLowerCase().includes(filter.toLowerCase())
+    );
 
     return (
         <div className="min-h-screen bg-gradient-subtle">
@@ -188,134 +194,202 @@ const BulkDeletePage = () => {
                         <Trash2 className="h-10 w-10 text-destructive" />
                         <div>
                             <h1 className="text-3xl font-bold">Bulk Delete Members</h1>
-                            <p className="text-muted-foreground">Select a project, load members, and start deletion.</p>
+                            <p className="text-muted-foreground">Select a project and load members to begin deletion.</p>
                         </div>
                     </div>
 
-                    <Card className="bg-gradient-card shadow-card border-primary/10">
-                        <CardHeader><CardTitle>Project Selection</CardTitle></CardHeader>
-                        <CardContent className="flex flex-col sm:flex-row gap-4">
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Project Selection</CardTitle>
+                        </CardHeader>
+                        <CardContent className="flex items-center gap-4">
                             <Select 
-                                onValueChange={handleProjectChange} 
-                                value={selectedProject?.siteId || ""}
-                                disabled={isDeleting}
+                                value={selectedProject?.siteId || ""} 
+                                onValueChange={(siteId) => setSelectedProject(headlessProjects.find(p => p.siteId === siteId) || null)} 
                             >
                                 <SelectTrigger>
                                     <SelectValue placeholder="Select a project..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {headlessProjects.map(project => (
-                                        <SelectItem key={project.siteId} value={project.siteId}>
-                                            {project.projectName}
-                                        </SelectItem>
-                                    ))}
+                                    {headlessProjects.map(site => <SelectItem key={site.siteId} value={site.siteId}>{site.projectName}</SelectItem>)}
                                 </SelectContent>
                             </Select>
-                            <Button className="w-full sm:w-auto" onClick={handleListAllMembers} disabled={!selectedProject || isFetchingAllMembers || isDeleting}>
-                                <ListChecks className="mr-2 h-4 w-4" />
-                                {isFetchingAllMembers ? 'Loading...' : 'Load Members'}
+                            <Button onClick={handleLoadMembers} disabled={isLoadingMembers || !selectedProject}>
+                                <RefreshCw className={`mr-2 h-4 w-4 ${isLoadingMembers ? 'animate-spin' : ''}`} />
+                                {isLoadingMembers ? "Loading..." : "Load Members"}
                             </Button>
                         </CardContent>
                     </Card>
-
-                    {(isDeleting || logs.length > 0) && (
-                        <Card className="bg-gradient-card shadow-card border-primary/10">
-                             <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                    <Terminal className="h-5 w-5" />
-                                    Deletion Job Status
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <Textarea
-                                    ref={logContainerRef}
-                                    readOnly
-                                    value={logs.join('\n')}
-                                    className="h-40 resize-y bg-black font-mono text-xs text-green-400"
-                                    placeholder="Logs will appear here..."
-                                />
-                            </CardContent>
-                        </Card>
-                    )}
-
-                    {allMembers.length > 0 && (
-                        <Card className="bg-gradient-card shadow-card border-primary/10">
-                            <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    
+                    <Card>
+                        <CardHeader>
+                            <div className="flex justify-between items-center">
                                 <div>
-                                    <CardTitle>Manage Members ({allMembers.length})</CardTitle>
+                                    <CardTitle>Manage Members ({filteredMembers.length})</CardTitle>
                                     <CardDescription>Select members from the list to include in the bulk deletion.</CardDescription>
                                 </div>
-                                <div className="flex items-center gap-2 w-full sm:w-auto">
-                                    <Input placeholder="Filter results..." value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} className="w-full sm:w-40 h-8" />
-                                    <Button variant="outline" size="sm" onClick={() => exportEmailsToTxt(filteredAllMembers, 'all-members-emails')}><Download className="mr-2 h-4 w-4"/>Export</Button>
+                                <div className="flex items-center gap-2">
+                                    <Input 
+                                        placeholder="Filter results..."
+                                        value={filter}
+                                        onChange={(e) => setFilter(e.target.value)}
+                                        className="w-48"
+                                    />
                                 </div>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="border rounded-lg overflow-hidden max-h-[60vh] overflow-y-auto">
-                                    <Table>
-                                        <TableHeader>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="border rounded-lg max-h-[500px] overflow-y-auto">
+                                <Table>
+                                    <TableHeader className="sticky top-0 bg-background">
+                                        <TableRow>
+                                            <TableHead className="w-[50px]">
+                                                <Checkbox
+                                                    checked={filteredMembers.length > 0 && selectedMembers.length > 0 && selectedMembers.length === filteredMembers.filter(m => m.contactId !== ownerContactId).length}
+                                                    onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
+                                                />
+                                            </TableHead>
+                                            <TableHead>Name</TableHead>
+                                            <TableHead>Email</TableHead>
+                                            <TableHead>Status</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {isLoadingMembers ? (
                                             <TableRow>
-                                                <TableHead className="w-[50px]">
-                                                    <Checkbox
-                                                        checked={filteredAllMembers.length > 0 && selectedMemberIds.length === filteredAllMembers.length}
-                                                        onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
-                                                        aria-label="Select all"
-                                                    />
-                                                </TableHead>
-                                                <TableHead>Name</TableHead>
-                                                <TableHead>Email</TableHead>
-                                                <TableHead>Status</TableHead>
+                                                <TableCell colSpan={4} className="h-24 text-center">Loading members...</TableCell>
                                             </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {filteredAllMembers.map((member) => (
-                                                <TableRow key={member.id} data-state={selectedMemberIds.includes(member.id) && "selected"}>
+                                        ) : filteredMembers.length > 0 ? (
+                                            filteredMembers.map(member => {
+                                                const isOwner = member.contactId === ownerContactId;
+                                                return (
+                                                <TableRow key={member.id} className={isOwner ? "opacity-50" : ""}>
                                                     <TableCell>
-                                                        <Checkbox
-                                                            checked={selectedMemberIds.includes(member.id)}
-                                                            onCheckedChange={(checked) => {
-                                                                setSelectedMemberIds(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
-                                                            }}
-                                                            aria-label={`Select ${member.loginEmail}`}
-                                                        />
+                                                        <TooltipProvider>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <span tabIndex={0}>
+                                                                        <Checkbox 
+                                                                            checked={selectedMembers.includes(member.id)}
+                                                                            onCheckedChange={(checked) => handleSelectMember(member.id, Boolean(checked))}
+                                                                            disabled={isOwner}
+                                                                        />
+                                                                    </span>
+                                                                </TooltipTrigger>
+                                                                {isOwner && <TooltipContent><p>Site owner cannot be deleted.</p></TooltipContent>}
+                                                            </Tooltip>
+                                                        </TooltipProvider>
                                                     </TableCell>
                                                     <TableCell>{member.profile?.nickname || 'N/A'}</TableCell>
                                                     <TableCell>{member.loginEmail}</TableCell>
-                                                    <TableCell>{member.status}</TableCell>
+                                                    <TableCell><Badge variant="outline">{member.status}</Badge></TableCell>
                                                 </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                </div>
-                            </CardContent>
-                             {selectedMemberIds.length > 0 && (
-                                <CardFooter>
+                                            )})
+                                        ) : (
+                                            <TableRow>
+                                                <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
+                                                    No members loaded.
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        </CardContent>
+                         <CardFooter className="flex flex-col items-start gap-4">
+                            <div className="flex items-center gap-4">
+                                {selectedMembers.length > 0 && !isDeleting && (
                                     <AlertDialog>
                                         <AlertDialogTrigger asChild>
-                                            <Button variant="destructive" disabled={isDeleting}>
-                                                {isDeleting ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                                                {isDeleting ? 'Deleting...' : `Delete (${selectedMemberIds.length}) Selected`}
+                                            <Button variant="destructive">
+                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                Delete ({selectedMembers.length}) Selected
                                             </Button>
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
                                             <AlertDialogHeader>
-                                                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                                <AlertDialogDescription>This will permanently delete the selected {selectedMemberIds.length} members. This action cannot be undone and may take a while to complete.</AlertDialogDescription>
+                                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                                                <AlertDialogDescription>
+                                                    This will permanently delete the selected {selectedMembers.length} member(s) and their associated contacts. This action cannot be undone.
+                                                </AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
                                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                <AlertDialogAction onClick={handleDeleteSelected} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Yes, Start Deletion</AlertDialogAction>
+                                                <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                                    Yes, Delete
+                                                </AlertDialogAction>
                                             </AlertDialogFooter>
                                         </AlertDialogContent>
                                     </AlertDialog>
-                                </CardFooter>
+                                )}
+                                {isDeleting && (
+                                    <Button variant="destructive" onClick={handleCancelJob}>
+                                        <Ban className="mr-2 h-4 w-4" />
+                                        Cancel Job
+                                    </Button>
+                                )}
+                            </div>
+                            {(isDeleting || logs.length > 0) && (
+                                <div className="w-full space-y-4">
+                                    {isDeleting && (
+                                        <div>
+                                            <Progress value={deletionProgress} className="w-full" />
+                                            <p className="text-sm text-muted-foreground mt-2">{deletionStatus}</p>
+                                        </div>
+                                    )}
+                                    <Card>
+                                        <CardHeader><CardTitle>Deletion Logs</CardTitle></CardHeader>
+                                        <CardContent className="max-h-60 overflow-y-auto">
+                                            <Accordion type="multiple" className="w-full">
+                                                {logs.map((log, i) => (
+                                                    <AccordionItem value={`item-${i}`} key={i} className="border-b last:border-b-0">
+                                                        <AccordionTrigger className="p-4 hover:no-underline text-sm">
+                                                            <div className="flex items-center justify-between w-full">
+                                                                <div className="flex items-center gap-4">
+                                                                    <span>Batch {log.batch}</span>
+                                                                    <span>{log.type}</span>
+                                                                    <span className={log.status === 'SUCCESS' ? 'text-green-500' : 'text-red-500'}>{log.status}</span>
+                                                                </div>
+                                                                <span>{log.details}</span>
+                                                            </div>
+                                                        </AccordionTrigger>
+                                                        <AccordionContent className="bg-muted/50 p-4">
+                                                            {log.contactResults && log.contactResults.length > 0 ? (
+                                                                <Table>
+                                                                    <TableHeader>
+                                                                        <TableRow>
+                                                                            <TableHead>Email</TableHead>
+                                                                            <TableHead>Status</TableHead>
+                                                                            <TableHead>Error Details</TableHead>
+                                                                        </TableRow>
+                                                                    </TableHeader>
+                                                                    <TableBody>
+                                                                        {log.contactResults.map((result, j) => (
+                                                                            <TableRow key={j}>
+                                                                                <TableCell>{result.email}</TableCell>
+                                                                                <TableCell className={result.status === 'SUCCESS' ? 'text-green-500' : 'text-red-500'}>{result.status}</TableCell>
+                                                                                <TableCell className="text-red-500">{result.error}</TableCell>
+                                                                            </TableRow>
+                                                                        ))}
+                                                                    </TableBody>
+                                                                </Table>
+                                                            ) : (
+                                                                <p className="text-sm text-muted-foreground">No detailed contact results for this batch.</p>
+                                                            )}
+                                                        </AccordionContent>
+                                                    </AccordionItem>
+                                                ))}
+                                            </Accordion>
+                                        </CardContent>
+                                    </Card>
+                                </div>
                             )}
-                        </Card>
-                    )}
+                        </CardFooter>
+                    </Card>
                 </div>
             </div>
         </div>
     );
-}
+};
 
 export default BulkDeletePage;
