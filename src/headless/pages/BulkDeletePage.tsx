@@ -13,7 +13,6 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Progress } from "@/components/ui/progress";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface HeadlessProject {
@@ -36,19 +35,17 @@ interface LogEntry {
     batch: number;
     status: string;
     details: string;
+    contactResults?: { email: string; status: string; error?: string }[];
 }
 
 const BulkDeletePage = () => {
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | null>(null);
-    const [ownerContactId, setOwnerContactId] = useState<string | null>(null);
-    const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
     const [members, setMembers] = useState<Member[]>([]);
     const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
     const [filter, setFilter] = useState("");
     const [isDeleting, setIsDeleting] = useState(false);
-    const [deletionProgress, setDeletionProgress] = useState(0);
-    const [deletionStatus, setDeletionStatus] = useState("");
     const [logs, setLogs] = useState<LogEntry[]>([]);
 
     useEffect(() => {
@@ -68,49 +65,44 @@ const BulkDeletePage = () => {
         fetchProjects();
     }, []);
 
-    // ★★★ FIX: This useEffect now triggers the single, safe data-loading function. ★★★
-    useEffect(() => {
-        if (selectedProject) {
-            handleLoadMembersAndOwner();
-        }
-    }, [selectedProject]);
-    
-    // ★★★ FIX: This is now the ONLY function that fetches member data. ★★★
-    // It calls the backend 'list' action which securely filters out the owner.
-    const handleLoadMembersAndOwner = async () => {
+    const handleLoadMembers = async () => {
         if (!selectedProject) return;
-        setIsLoadingMembers(true);
+        setIsLoading(true);
         setMembers([]);
         setSelectedMembers([]);
-        setOwnerContactId(null);
-        setLogs([]);
+        setLogs([]); // Clear logs when loading a new list
         try {
             const response = await fetch(`/api/headless-bulk-operations`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ siteId: selectedProject.siteId, action: 'list' }),
             });
+
             const data = await response.json();
             if (!response.ok) throw new Error(data.message || 'Failed to load members.');
             
-            // The backend now provides the pre-filtered member list and the owner's ID
+            // The backend provides a pre-filtered member list. The owner is never received.
             setMembers(data.members || []);
-            setOwnerContactId(data.ownerContactId || null);
+            toast({ title: "Success", description: `Loaded ${data.members?.length || 0} deletable members.` });
 
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
         } finally {
-            setIsLoadingMembers(false);
+            setIsLoading(false);
         }
     };
+    
+    useEffect(() => {
+        if (selectedProject) {
+            handleLoadMembers();
+        }
+    }, [selectedProject]);
     
     const handleStartDeletion = async () => {
         if (selectedMembers.length === 0 || !selectedProject) return;
 
         setIsDeleting(true);
-        setLogs([]);
-        setDeletionProgress(0);
-        setDeletionStatus("Starting deletion job...");
+        setLogs([]); // Start with fresh logs for this job
 
         const membersToDelete = members.filter(m => selectedMembers.includes(m.id));
 
@@ -121,32 +113,27 @@ const BulkDeletePage = () => {
                 body: JSON.stringify({ 
                     siteId: selectedProject.siteId, 
                     action: 'delete',
-                    membersToDelete // This list is already safe because the owner was filtered out
+                    membersToDelete 
                 }),
             });
 
             const result = await response.json();
-            setLogs(result.logs || []);
+            setLogs(result.logs || []); // Set the logs to be displayed persistently
             
             if (!response.ok || !result.success) {
-                throw new Error(result.error || 'Deletion job failed.');
+                throw new Error(result.message || 'Deletion job failed on the backend.');
             }
 
             toast({ title: "Success", description: result.message });
-            setDeletionStatus("Job completed successfully.");
+            handleLoadMembers(); // Refresh the list after a successful deletion
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
-            setDeletionStatus(`Job failed: ${error.message}`);
         } finally {
             setIsDeleting(false);
-            setDeletionProgress(100);
-            // Reload the member list after deletion is complete
-            handleLoadMembersAndOwner();
         }
     };
 
     const handleSelectAll = (checked: boolean) => {
-        // The filteredMembers list already excludes the owner, so this is safe.
         setSelectedMembers(checked ? filteredMembers.map(m => m.id) : []);
     };
     
@@ -160,7 +147,7 @@ const BulkDeletePage = () => {
             <Navbar />
             <div className="container mx-auto px-4 pt-24 pb-12">
                 <div className="max-w-4xl mx-auto space-y-8">
-                    {/* Header and Project Selection */}
+                    {/* Header */}
                     <div className="flex items-center gap-4 animate-fade-in">
                         <Trash2 className="h-10 w-10 text-destructive" />
                         <div>
@@ -169,15 +156,13 @@ const BulkDeletePage = () => {
                         </div>
                     </div>
 
+                    {/* Project Selection Card */}
                     <Card>
                         <CardHeader><CardTitle>Project Selection</CardTitle></CardHeader>
                         <CardContent className="flex items-center gap-4">
                             <Select 
                                 value={selectedProject?.siteId || ""} 
-                                onValueChange={(siteId) => {
-                                    setSelectedProject(headlessProjects.find(p => p.siteId === siteId) || null);
-                                    setLogs([]);
-                                }}
+                                onValueChange={(siteId) => setSelectedProject(headlessProjects.find(p => p.siteId === siteId) || null)}
                                 disabled={isDeleting}
                             >
                                 <SelectTrigger><SelectValue placeholder="Select a project..." /></SelectTrigger>
@@ -185,16 +170,20 @@ const BulkDeletePage = () => {
                                     {headlessProjects.map(project => <SelectItem key={project.siteId} value={project.siteId}>{project.projectName}</SelectItem>)}
                                 </SelectContent>
                             </Select>
+                            <Button onClick={handleLoadMembers} disabled={isLoading || !selectedProject}>
+                                <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+                                {isLoading ? "Loading..." : "Reload List"}
+                            </Button>
                         </CardContent>
                     </Card>
                     
-                    {/* Member Management Table */}
+                    {/* Member Management Card */}
                     <Card>
                         <CardHeader>
                             <div className="flex justify-between items-center">
                                 <div>
                                     <CardTitle>Manage Members ({filteredMembers.length})</CardTitle>
-                                    <CardDescription>Select members to delete. Site contributors are protected and hidden from this list.</CardDescription>
+                                    <CardDescription>Select members to delete. The site owner is protected and hidden from this list.</CardDescription>
                                 </div>
                                 <Input 
                                     placeholder="Filter members..."
@@ -221,8 +210,8 @@ const BulkDeletePage = () => {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {isLoadingMembers ? (
-                                            <TableRow><TableCell colSpan={4} className="h-24 text-center">Loading and filtering members...</TableCell></TableRow>
+                                        {isLoading ? (
+                                            <TableRow><TableCell colSpan={4} className="h-24 text-center">Loading members...</TableCell></TableRow>
                                         ) : filteredMembers.length > 0 ? (
                                             filteredMembers.map(member => (
                                                 <TableRow key={member.id}>
@@ -246,7 +235,7 @@ const BulkDeletePage = () => {
                                 </Table>
                             </div>
                         </CardContent>
-                        <CardFooter className="flex flex-col items-start gap-4">
+                        <CardFooter>
                              {selectedMembers.length > 0 && (
                                 <AlertDialog>
                                     <AlertDialogTrigger asChild>
@@ -274,25 +263,29 @@ const BulkDeletePage = () => {
                         </CardFooter>
                     </Card>
 
-                    {/* Deletion Job Status and Logs */}
+                    {/* Persistent Logs Card */}
                     {logs.length > 0 && (
                          <Card>
-                            <CardHeader><CardTitle>Deletion Job Status</CardTitle></CardHeader>
-                            <CardContent className="space-y-4">
-                                {isDeleting && (
-                                    <div>
-                                        <Progress value={deletionProgress} className="w-full" />
-                                        <p className="text-sm text-muted-foreground mt-2">{deletionStatus}</p>
-                                    </div>
-                                )}
-                                <Accordion type="single" collapsible className="w-full" defaultValue="logs">
-                                    <AccordionItem value="logs">
+                            <CardHeader><CardTitle>Deletion Job Logs</CardTitle></CardHeader>
+                            <CardContent>
+                                <Accordion type="single" collapsible className="w-full" defaultValue="logs-item">
+                                    <AccordionItem value="logs-item">
                                         <AccordionTrigger>View Detailed Logs</AccordionTrigger>
                                         <AccordionContent className="max-h-60 overflow-y-auto">
                                            {logs.map((log, i) => (
                                                <div key={i} className="text-xs p-2 border-b">
-                                                   <p><strong>Type:</strong> {log.type} | <strong>Batch:</strong> {log.batch} | <span className={log.status === 'SUCCESS' ? 'text-green-500' : 'text-red-500'}><strong>Status:</strong> {log.status}</span></p>
+                                                   <p><strong>Type:</strong> {log.type} | <span className={log.status.includes('SUCCESS') || log.status.includes('COMPLETED') ? 'text-green-500' : 'text-red-500'}><strong>Status:</strong> {log.status}</span></p>
                                                    <p><strong>Details:</strong> {log.details}</p>
+                                                    {log.contactResults && (
+                                                       <Table className="mt-2 text-xs">
+                                                           <TableHeader><TableRow><TableHead>Email</TableHead><TableHead>Status</TableHead><TableHead>Error</TableHead></TableRow></TableHeader>
+                                                           <TableBody>
+                                                               {log.contactResults.map((res, j) => (
+                                                                    <TableRow key={j}><TableCell>{res.email}</TableCell><TableCell>{res.status}</TableCell><TableCell>{res.error || 'N/A'}</TableCell></TableRow>
+                                                               ))}
+                                                           </TableBody>
+                                                       </Table>
+                                                   )}
                                                </div>
                                            ))}
                                         </AccordionContent>
