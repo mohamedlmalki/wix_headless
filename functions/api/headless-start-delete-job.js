@@ -53,7 +53,7 @@ export async function onRequestPost({ request, env }) {
             // Step 1: Bulk delete member profiles
             const memberIdsInChunk = chunk.map(m => m.id);
             try {
-                // **THE FIX** Using "member_ids" as the field name
+                // Using "member_ids" as the field name
                 await makeApiRequest(
                     'https://www.wixapis.com/members/v1/members/bulk/delete', 
                     { ...defaultOptions, method: 'POST' }, 

@@ -38,7 +38,6 @@ interface LogEntry {
     details: string;
 }
 
-
 const BulkDeletePage = () => {
     const [headlessProjects, setHeadlessProjects] = useState<HeadlessProject[]>([]);
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | null>(null);
@@ -164,7 +163,7 @@ const BulkDeletePage = () => {
                                 value={selectedProject?.siteId || ""} 
                                 onValueChange={(siteId) => {
                                     setSelectedProject(headlessProjects.find(p => p.siteId === siteId) || null);
-                                    setLogs([]);
+                                    setLogs([]); // Clear logs when changing project
                                 }}
                                 disabled={isDeleting}
                             >
@@ -264,7 +263,7 @@ const BulkDeletePage = () => {
                                         </AlertDialogHeader>
                                         <AlertDialogFooter>
                                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                            <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                            <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive hover:bg-destructive/90">
                                                 Yes, Delete
                                             </AlertDialogAction>
                                         </AlertDialogFooter>
