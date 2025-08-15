@@ -13,14 +13,11 @@ function chunkArray(array, size) {
 async function getErrorDetails(response) {
     try {
         const parsed = await response.json();
-        // The most common Wix error format
         if (parsed.message) {
             return `Wix API Error: ${parsed.message}`;
         }
-        // Fallback for other error structures
         return `API Error: ${JSON.stringify(parsed)}`;
     } catch (e) {
-        // If the error response isn't JSON
         const textResponse = await response.text();
         return `An unknown error occurred. Status: ${response.status}. Response: ${textResponse}`;
     }
@@ -38,16 +35,17 @@ export async function onRequestPost(context) {
         if (!project) {
             return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
         }
-
-        const memberChunks = chunkArray(membersToDelete, 100);
+        
+        // This takes just the member IDs needed for the bulk delete endpoint
+        const memberIdsToDelete = membersToDelete.map(m => m.memberId).filter(Boolean);
+        const memberChunks = chunkArray(memberIdsToDelete, 100); // Wix API limit is 100 per bulk request
         let membersDeletedCount = 0;
 
         for (let i = 0; i < memberChunks.length; i++) {
             const chunk = memberChunks[i];
             const currentChunkNumber = i + 1;
-            const memberIdsInChunk = chunk.map(m => m.memberId).filter(Boolean);
 
-            if (memberIdsInChunk.length > 0) {
+            if (chunk.length > 0) {
                 const response = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
                     method: 'POST',
                     headers: { 
@@ -55,24 +53,23 @@ export async function onRequestPost(context) {
                         'wix-site-id': project.siteId, 
                         'Content-Type': 'application/json' 
                     },
-                    body: JSON.stringify({ "memberIds": memberIdsInChunk })
+                    body: JSON.stringify({ "memberIds": chunk })
                 });
 
                 if (!response.ok) {
                     const errorDetails = await getErrorDetails(response);
-                    // If any batch fails, we stop immediately and return an error.
                     throw new Error(`Job failed on batch ${currentChunkNumber}. **Please check your API Key has 'Manage Members (Full Permissions)'**. Details: ${errorDetails}`);
                 }
                 
-                // If successful, update our counter
-                membersDeletedCount += memberIdsInChunk.length;
+                membersDeletedCount += chunk.length;
             }
             
-            // Wait 1 second before processing the next chunk to avoid rate limiting.
-            await delay(1000); 
+            // Wait 1 second before the next chunk to avoid rate limiting
+            if(memberChunks.length > 1 && i < memberChunks.length -1) {
+              await delay(1000); 
+            }
         }
 
-        // If the loop completes without throwing an error, it was successful.
         return new Response(JSON.stringify({ 
             success: true, 
             message: `Successfully deleted ${membersDeletedCount} members.` 
@@ -82,7 +79,6 @@ export async function onRequestPost(context) {
         });
 
     } catch (e) {
-        // Catch any errors from the loop or initial setup.
         return new Response(JSON.stringify({ 
             success: false, 
             message: 'A critical error occurred during the deletion process.', 

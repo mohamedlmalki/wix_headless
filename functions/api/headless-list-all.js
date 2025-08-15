@@ -34,41 +34,43 @@ async function fetchAllMembers(project) {
   return allMembers;
 }
 
-async function getAdminAndOwnerMemberIds(project) {
-    const adminMemberIds = new Set();
+async function getContributorMemberIds(project) {
+    const contributorMemberIds = new Set();
     try {
-        const rolesUrl = 'https://www.wixapis.com/roles/v1/roles';
-        const rolesResponse = await fetch(rolesUrl, {
+        const contributorsUrl = `https://www.wixapis.com/sites/v1/sites/${project.siteId}/contributors`;
+        const contributorsResponse = await fetch(contributorsUrl, {
             headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
         });
 
-        if (!rolesResponse.ok) {
-            console.warn("Could not fetch site roles. Proceeding without admin filtering.");
+        if (!contributorsResponse.ok) {
+            console.warn("Could not fetch site contributors. Proceeding without this filter.");
             return [];
         }
         
-        const { roles } = await rolesResponse.json();
-        const adminRoleIds = roles
-            .filter(role => role.systemType === 'SITE_CONTRIBUTOR' || role.name === 'Admin' || role.name === 'Owner')
-            .map(role => role.id);
+        const { contributors } = await contributorsResponse.json();
+        if (contributors) {
+            for (const contributor of contributors) {
+                // Find the member ID associated with the contributor's email
+                const memberQueryUrl = 'https://www.wixapis.com/members/v1/members/query';
+                const memberQueryBody = JSON.stringify({ query: { filter: { loginEmail: contributor.email } } });
+                const memberResponse = await fetch(memberQueryUrl, {
+                    method: 'POST',
+                    headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId, 'Content-Type': 'application/json' },
+                    body: memberQueryBody,
+                });
 
-        if (adminRoleIds.length === 0) return [];
-
-        for (const roleId of adminRoleIds) {
-            const membersInRoleUrl = `https://www.wixapis.com/roles/v1/roles/${roleId}/members`;
-            const membersResponse = await fetch(membersInRoleUrl, {
-                headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
-            });
-
-            if (membersResponse.ok) {
-                const { members } = await membersResponse.json();
-                if (members) members.forEach(member => adminMemberIds.add(member.id));
+                if (memberResponse.ok) {
+                    const { members } = await memberResponse.json();
+                    if (members && members.length > 0) {
+                        contributorMemberIds.add(members[0].id);
+                    }
+                }
             }
         }
     } catch (error) {
-        console.error("Failed to get admin/owner roles, proceeding without this filter.", error);
+        console.error("Failed to get contributor member IDs, proceeding without this filter.", error);
     }
-    return Array.from(adminMemberIds);
+    return Array.from(contributorMemberIds);
 }
 
 export async function onRequestPost({ request, env }) {
@@ -82,17 +84,13 @@ export async function onRequestPost({ request, env }) {
       return new Response(JSON.stringify({ message: `Project not found for siteId: ${siteId}` }), { status: 404 });
     }
 
-    const [allMembers, adminIds] = await Promise.all([
+    const [allMembers, contributorIds] = await Promise.all([
         fetchAllMembers(project),
-        getAdminAndOwnerMemberIds(project)
+        getContributorMemberIds(project)
     ]);
 
-    // **CRITICAL FIX**: Filter out admins AND the project owner's email from the config
-    const filteredMembers = allMembers.filter(member => {
-        const isAdmin = adminIds.includes(member.id);
-        const isOwner = project.ownerEmail && member.loginEmail.toLowerCase() === project.ownerEmail.toLowerCase();
-        return !isAdmin && !isOwner; // Return only if they are NOT an admin AND NOT the owner
-    });
+    // Filter out any member who is also a site contributor
+    const filteredMembers = allMembers.filter(member => !contributorIds.includes(member.id));
 
     return new Response(JSON.stringify({ members: filteredMembers }), {
       status: 200,

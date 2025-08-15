@@ -5,16 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, RefreshCw, Download, ListChecks, Terminal, AlertTriangle } from "lucide-react";
+import { Trash2, RefreshCw, Download, ListChecks, Terminal } from "lucide-react";
 import Navbar from '@/components/Navbar';
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
-// Types
 interface HeadlessProject {
   projectName: string;
   siteId: string;
@@ -30,7 +28,7 @@ interface Member {
   status?: string;
 }
 
-const exportEmailsToTxt = (data: any[], filename: string) => {
+const exportEmailsToTxt = (data: Member[], filename: string) => {
     const emails = data.map(row => row.loginEmail).filter(Boolean);
     if (emails.length === 0) {
         alert("No emails to export.");
@@ -51,8 +49,8 @@ const BulkDeletePage = () => {
     const [selectedProject, setSelectedProject] = useState<HeadlessProject | null>(null);
     const [allMembers, setAllMembers] = useState<Member[]>([]);
     const [isFetchingAllMembers, setIsFetchingAllMembers] = useState(false);
-    const [selectedAllMembers, setSelectedAllMembers] = useState<string[]>([]);
-    const [allMembersFilterQuery, setAllMembersFilterQuery] = useState("");
+    const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+    const [filterQuery, setFilterQuery] = useState("");
     const [isDeleting, setIsDeleting] = useState(false);
     const [logs, setLogs] = useState<string[]>([]);
     const { toast } = useToast();
@@ -81,25 +79,29 @@ const BulkDeletePage = () => {
                     }
                 }
             } catch (error) {
-                addLog(`Error loading projects: ${(error as Error).message}`);
+                const errorMessage = `Error loading projects: ${(error as Error).message}`;
+                addLog(errorMessage);
                 toast({ title: "Error", description: "Could not load projects.", variant: "destructive" });
             }
         };
         fetchProjects();
-    }, []);
+    }, [toast, selectedProject]);
 
     const handleListAllMembers = async () => {
         if (!selectedProject?.siteId) return;
         setIsFetchingAllMembers(true);
         setAllMembers([]);
-        setSelectedAllMembers([]);
+        setSelectedMemberIds([]);
         try {
             const response = await fetch('/api/headless-list-all', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ siteId: selectedProject.siteId }),
             });
-            if (!response.ok) throw new Error('Failed to fetch the member list.');
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to fetch the member list.');
+            }
             const data = await response.json();
             setAllMembers(data.members || []);
         } catch (error) {
@@ -109,23 +111,21 @@ const BulkDeletePage = () => {
         }
     };
 
-    const handleDeleteAllSelected = async () => {
-        if (selectedAllMembers.length === 0 || !selectedProject?.siteId) {
+    const handleDeleteSelected = async () => {
+        if (selectedMemberIds.length === 0 || !selectedProject?.siteId) {
             return;
         }
 
         setIsDeleting(true);
-        setLogs([]); // Clear previous logs
-        addLog(`Starting deletion job for ${selectedAllMembers.length} members... Please wait, this may take some time.`);
+        setLogs([]);
+        addLog(`Starting deletion job for ${selectedMemberIds.length} members. This may take some time.`);
 
         try {
             const membersToDelete = allMembers
-                .filter(member => selectedAllMembers.includes(member.id))
+                .filter(member => selectedMemberIds.includes(member.id))
                 .map(member => ({ memberId: member.id, contactId: member.contactId }));
-
-            // **THIS IS THE PROOF**: Log the exact count being sent to the backend.
-            console.log(`Sending ${membersToDelete.length} members to the backend for deletion.`);
-            addLog(`Sending ${membersToDelete.length} members to the backend...`);
+            
+            addLog(`Sending ${membersToDelete.length} members to the backend for deletion...`);
 
             const response = await fetch('/api/headless-start-delete-job', {
                 method: 'POST',
@@ -136,13 +136,15 @@ const BulkDeletePage = () => {
             const result = await response.json();
 
             if (!response.ok || !result.success) {
-                throw new Error(result.error || result.message || "An unknown backend error occurred.");
+                throw new Error(result.error || result.message || "An unknown backend error occurred during deletion.");
             }
 
             addLog(`SUCCESS: ${result.message}`);
             toast({ title: "Deletion Complete", description: result.message });
-            // Refresh the list to show the result
+            
+            // Refresh the member list after deletion
             handleListAllMembers();
+            setSelectedMemberIds([]);
 
         } catch (error: any) {
             addLog(`FATAL ERROR: ${error.message}`);
@@ -157,17 +159,25 @@ const BulkDeletePage = () => {
         if (project) {
             setSelectedProject(project);
             setAllMembers([]);
-            setSelectedAllMembers([]);
-            setAllMembersFilterQuery("");
+            setSelectedMemberIds([]);
+            setFilterQuery("");
             setLogs([]);
-            setIsDeleting(false);
         }
     };
     
     const filteredAllMembers = allMembers.filter(member =>
-        member.profile?.nickname?.toLowerCase().includes(allMembersFilterQuery.toLowerCase()) ||
-        member.loginEmail.toLowerCase().includes(allMembersFilterQuery.toLowerCase())
+        member.profile?.nickname?.toLowerCase().includes(filterQuery.toLowerCase()) ||
+        member.loginEmail.toLowerCase().includes(filterQuery.toLowerCase())
     );
+
+    const handleSelectAll = (checked: boolean) => {
+        if (checked) {
+            const allIds = filteredAllMembers.map(m => m.id);
+            setSelectedMemberIds(allIds);
+        } else {
+            setSelectedMemberIds([]);
+        }
+    };
 
     return (
         <div className="min-h-screen bg-gradient-subtle">
@@ -178,7 +188,7 @@ const BulkDeletePage = () => {
                         <Trash2 className="h-10 w-10 text-destructive" />
                         <div>
                             <h1 className="text-3xl font-bold">Bulk Delete Members</h1>
-                            <p className="text-muted-foreground">Select a project and load members to begin deletion.</p>
+                            <p className="text-muted-foreground">Select a project, load members, and start deletion.</p>
                         </div>
                     </div>
 
@@ -218,7 +228,6 @@ const BulkDeletePage = () => {
                             </CardHeader>
                             <CardContent>
                                 <Textarea
-                                    id="logs"
                                     ref={logContainerRef}
                                     readOnly
                                     value={logs.join('\n')}
@@ -237,7 +246,7 @@ const BulkDeletePage = () => {
                                     <CardDescription>Select members from the list to include in the bulk deletion.</CardDescription>
                                 </div>
                                 <div className="flex items-center gap-2 w-full sm:w-auto">
-                                    <Input placeholder="Filter results..." value={allMembersFilterQuery} onChange={(e) => setAllMembersFilterQuery(e.target.value)} className="w-full sm:w-40 h-8" />
+                                    <Input placeholder="Filter results..." value={filterQuery} onChange={(e) => setFilterQuery(e.target.value)} className="w-full sm:w-40 h-8" />
                                     <Button variant="outline" size="sm" onClick={() => exportEmailsToTxt(filteredAllMembers, 'all-members-emails')}><Download className="mr-2 h-4 w-4"/>Export</Button>
                                 </div>
                             </CardHeader>
@@ -248,11 +257,8 @@ const BulkDeletePage = () => {
                                             <TableRow>
                                                 <TableHead className="w-[50px]">
                                                     <Checkbox
-                                                        checked={filteredAllMembers.length > 0 && selectedAllMembers.length === filteredAllMembers.length}
-                                                        onCheckedChange={(checked) => {
-                                                            const allMemberIds = checked ? filteredAllMembers.map(m => m.id) : [];
-                                                            setSelectedAllMembers(allMemberIds);
-                                                        }}
+                                                        checked={filteredAllMembers.length > 0 && selectedMemberIds.length === filteredAllMembers.length}
+                                                        onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
                                                         aria-label="Select all"
                                                     />
                                                 </TableHead>
@@ -263,12 +269,12 @@ const BulkDeletePage = () => {
                                         </TableHeader>
                                         <TableBody>
                                             {filteredAllMembers.map((member) => (
-                                                <TableRow key={member.id} data-state={selectedAllMembers.includes(member.id) && "selected"}>
+                                                <TableRow key={member.id} data-state={selectedMemberIds.includes(member.id) && "selected"}>
                                                     <TableCell>
                                                         <Checkbox
-                                                            checked={selectedAllMembers.includes(member.id)}
+                                                            checked={selectedMemberIds.includes(member.id)}
                                                             onCheckedChange={(checked) => {
-                                                                setSelectedAllMembers(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
+                                                                setSelectedMemberIds(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
                                                             }}
                                                             aria-label={`Select ${member.loginEmail}`}
                                                         />
@@ -282,23 +288,23 @@ const BulkDeletePage = () => {
                                     </Table>
                                 </div>
                             </CardContent>
-                             {selectedAllMembers.length > 0 && (
+                             {selectedMemberIds.length > 0 && (
                                 <CardFooter>
                                     <AlertDialog>
                                         <AlertDialogTrigger asChild>
                                             <Button variant="destructive" disabled={isDeleting}>
                                                 {isDeleting ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                                                {isDeleting ? 'Deleting...' : `Delete (${selectedAllMembers.length}) Selected`}
+                                                {isDeleting ? 'Deleting...' : `Delete (${selectedMemberIds.length}) Selected`}
                                             </Button>
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
                                             <AlertDialogHeader>
                                                 <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                                                <AlertDialogDescription>This will permanently delete the selected {selectedAllMembers.length} members. This action cannot be undone and may take a while to complete.</AlertDialogDescription>
+                                                <AlertDialogDescription>This will permanently delete the selected {selectedMemberIds.length} members. This action cannot be undone and may take a while to complete.</AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
                                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                <AlertDialogAction onClick={handleDeleteAllSelected} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Yes, Start Deletion</AlertDialogAction>
+                                                <AlertDialogAction onClick={handleDeleteSelected} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Yes, Start Deletion</AlertDialogAction>
                                             </AlertDialogFooter>
                                         </AlertDialogContent>
                                     </AlertDialog>
