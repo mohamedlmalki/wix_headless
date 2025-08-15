@@ -1,6 +1,6 @@
 // src/headless/pages/BulkDeletePage.tsx
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -55,7 +55,6 @@ const BulkDeletePage = () => {
     const [deletionProgress, setDeletionProgress] = useState(0);
     const [deletionStatus, setDeletionStatus] = useState("");
     const [logs, setLogs] = useState<LogEntry[]>([]);
-    const jobCancelled = useRef(false);
 
     // Fetch projects on initial load
     useEffect(() => {
@@ -96,6 +95,10 @@ const BulkDeletePage = () => {
             if (!response.ok) throw new Error('Failed to load members.');
             const data = await response.json();
             setMembers(data.members || []);
+            // Set the owner contact ID from the response if available
+            if (data.ownerContactId) {
+                setOwnerContactId(data.ownerContactId);
+            }
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
         } finally {
@@ -106,7 +109,6 @@ const BulkDeletePage = () => {
     const handleStartDeletion = async () => {
         if (selectedMembers.length === 0 || !selectedProject) return;
 
-        jobCancelled.current = false;
         setIsDeleting(true);
         setLogs([]);
         setDeletionProgress(0);
@@ -122,8 +124,7 @@ const BulkDeletePage = () => {
             });
 
             const result = await response.json();
-            // *** THE FIX IS HERE: Ensure logs are always set from the result ***
-            setLogs(result.logs || [{ type: 'Member Deletion', batch: 1, status: 'ERROR', details: 'No logs returned from server.' }]);
+            setLogs(result.logs || []);
             
             if (!response.ok || !result.success) {
                 throw new Error(result.error || 'Deletion job failed.');
@@ -137,16 +138,12 @@ const BulkDeletePage = () => {
         } finally {
             setIsDeleting(false);
             setDeletionProgress(100);
-            handleLoadMembers();
+            handleLoadMembers(); // Refresh the list
         }
     };
 
-    const handleCancelJob = () => {
-        jobCancelled.current = true;
-    };
-
     const handleSelectAll = (checked: boolean) => {
-        setSelectedMembers(checked ? filteredMembers.map(m => m.id) : []);
+        setSelectedMembers(checked ? filteredMembers.filter(m => m.contactId !== ownerContactId).map(m => m.id) : []);
     };
     
     const filteredMembers = members.filter(member =>
@@ -210,7 +207,7 @@ const BulkDeletePage = () => {
                                         <TableRow>
                                             <TableHead className="w-[50px]">
                                                 <Checkbox
-                                                    checked={filteredMembers.length > 0 && selectedMembers.length === filteredMembers.length}
+                                                    checked={filteredMembers.length > 0 && selectedMembers.length > 0 && selectedMembers.length === filteredMembers.filter(m => m.contactId !== ownerContactId).length}
                                                     onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
                                                 />
                                             </TableHead>
@@ -223,21 +220,33 @@ const BulkDeletePage = () => {
                                         {isLoadingMembers ? (
                                             <TableRow><TableCell colSpan={4} className="h-24 text-center">Loading members...</TableCell></TableRow>
                                         ) : filteredMembers.length > 0 ? (
-                                            filteredMembers.map(member => (
-                                                <TableRow key={member.id}>
+                                            filteredMembers.map(member => {
+                                                const isOwner = member.contactId === ownerContactId;
+                                                return (
+                                                <TableRow key={member.id} className={isOwner ? "opacity-50" : ""}>
                                                     <TableCell>
-                                                        <Checkbox 
-                                                            checked={selectedMembers.includes(member.id)}
-                                                            onCheckedChange={(checked) => {
-                                                                setSelectedMembers(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
-                                                            }}
-                                                        />
+                                                        <TooltipProvider>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <span tabIndex={0}>
+                                                                        <Checkbox 
+                                                                            checked={selectedMembers.includes(member.id)}
+                                                                            onCheckedChange={(checked) => {
+                                                                                setSelectedMembers(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
+                                                                            }}
+                                                                            disabled={isOwner}
+                                                                        />
+                                                                    </span>
+                                                                </TooltipTrigger>
+                                                                {isOwner && <TooltipContent><p>Site owner cannot be deleted.</p></TooltipContent>}
+                                                            </Tooltip>
+                                                        </TooltipProvider>
                                                     </TableCell>
                                                     <TableCell>{member.profile?.nickname || 'N/A'}</TableCell>
                                                     <TableCell>{member.loginEmail}</TableCell>
                                                     <TableCell><Badge variant="outline">{member.status}</Badge></TableCell>
                                                 </TableRow>
-                                            ))
+                                            )})
                                         ) : (
                                             <TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">No members found.</TableCell></TableRow>
                                         )}
@@ -263,7 +272,7 @@ const BulkDeletePage = () => {
                                         </AlertDialogHeader>
                                         <AlertDialogFooter>
                                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                            <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive hover:bg-destructive/90">
+                                            <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                                                 Yes, Delete
                                             </AlertDialogAction>
                                         </AlertDialogFooter>
@@ -274,7 +283,6 @@ const BulkDeletePage = () => {
                     </Card>
 
                     {/* Deletion Job Status and Logs */}
-                    {/* *** THE FIX IS HERE: Changed condition to logs.length > 0 *** */}
                     {logs.length > 0 && (
                          <Card>
                             <CardHeader><CardTitle>Deletion Job Status</CardTitle></CardHeader>

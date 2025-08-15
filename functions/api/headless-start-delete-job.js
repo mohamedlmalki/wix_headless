@@ -2,30 +2,28 @@
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-function chunkArray(array, size) {
-  const chunks = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-}
-
-async function getErrorDetails(response) {
-    try {
-        const parsed = await response.json();
-        if (parsed.message) {
-            return `Wix API Error: ${parsed.message}`;
-        }
-        return `API Error: ${JSON.stringify(parsed)}`;
-    } catch (e) {
-        const textResponse = await response.text();
-        return `An unknown error occurred. Status: ${response.status}. Response: ${textResponse}`;
+// Helper to make API calls and handle errors
+const makeApiRequest = async (url, options, body = null) => {
+    const fetchOptions = { ...options };
+    if (body) {
+        fetchOptions.body = JSON.stringify(body);
     }
-}
+    const response = await fetch(url, fetchOptions);
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API call to ${url} failed with status ${response.status}: ${errorText}`);
+    }
+    try {
+        return await response.json();
+    } catch (e) {
+        return {}; // Return empty object if no JSON body, which is fine for DELETE requests
+    }
+};
 
-export async function onRequestPost(context) {
-    const { request, env } = context;
+// Main function to handle the POST request
+export async function onRequestPost({ request, env }) {
     const { siteId, membersToDelete } = await request.json();
+    const logs = [];
 
     try {
         const projectsJson = await env.WIX_HEADLESS_CONFIG.get('projects', { type: 'json' });
@@ -35,59 +33,73 @@ export async function onRequestPost(context) {
         if (!project) {
             return new Response(JSON.stringify({ message: "Project not found" }), { status: 404 });
         }
-        
-        const memberIdsToDelete = membersToDelete.map(m => m.memberId).filter(Boolean);
-        const memberChunks = chunkArray(memberIdsToDelete, 100);
-        let membersDeletedCount = 0;
 
-        for (let i = 0; i < memberChunks.length; i++) {
-            const chunk = memberChunks[i];
-            const currentChunkNumber = i + 1;
-
-            if (chunk.length > 0) {
-                // *** THE FIX IS HERE ***
-                // The field name was changed from "memberIds" to "member_ids" to match what the Wix API expects.
-                const body = JSON.stringify({ "member_ids": chunk });
-
-                const response = await fetch('https://www.wixapis.com/members/v1/members/bulk/delete', {
-                    method: 'POST',
-                    headers: { 
-                        'Authorization': project.apiKey, 
-                        'wix-site-id': project.siteId, 
-                        'Content-Type': 'application/json' 
-                    },
-                    body: body
-                });
-
-                if (!response.ok) {
-                    const errorDetails = await getErrorDetails(response);
-                    throw new Error(`Job failed on batch ${currentChunkNumber}. Details: ${errorDetails}`);
-                }
-                
-                membersDeletedCount += chunk.length;
+        const defaultOptions = {
+            headers: { 
+                'Authorization': project.apiKey, 
+                'wix-site-id': project.siteId, 
+                'Content-Type': 'application/json' 
             }
-            
-            if(memberChunks.length > 1 && i < memberChunks.length - 1) {
-              await delay(1000); 
-            }
+        };
+
+        // Chunk members into batches of 100
+        const memberChunks = [];
+        for (let i = 0; i < membersToDelete.length; i += 100) {
+            memberChunks.push(membersToDelete.slice(i, i + 100));
         }
 
-        return new Response(JSON.stringify({ 
-            success: true, 
-            message: `Successfully deleted ${membersDeletedCount} members.` 
-        }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
+        // Process each chunk according to the specified logic
+        for (let i = 0; i < memberChunks.length; i++) {
+            const chunk = memberChunks[i];
+            const batchNum = i + 1;
+            
+            // Step 1: Bulk delete member profiles
+            const memberIdsInChunk = chunk.map(m => m.memberId);
+            try {
+                // *** THE FIX IS HERE: Using "member_ids" as the field name ***
+                await makeApiRequest(
+                    'https://www.wixapis.com/members/v1/members/bulk/delete', 
+                    { ...defaultOptions, method: 'POST' }, 
+                    { member_ids: memberIdsInChunk }
+                );
+                logs.push({ type: 'Member Deletion', batch: batchNum, status: 'SUCCESS', details: `Bulk deleted ${memberIdsInChunk.length} member profiles.` });
+            } catch (error) {
+                logs.push({ type: 'Member Deletion', batch: batchNum, status: 'ERROR', details: error.message });
+                throw new Error(`A critical error occurred during member deletion in batch ${batchNum}.`);
+            }
+
+            // Step 2: Wait for 1 second
+            await delay(1000);
+
+            // Step 3: Delete associated contacts one-by-one
+            const contactResults = [];
+            for (const member of chunk) {
+                try {
+                    await makeApiRequest(
+                        `https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`,
+                        { ...defaultOptions, method: 'DELETE' }
+                    );
+                    contactResults.push({ email: member.loginEmail, status: 'SUCCESS' });
+                } catch (error) {
+                    contactResults.push({ email: member.loginEmail, status: 'ERROR', error: error.message });
+                }
+            }
+            logs.push({ 
+                type: 'Contact Deletion', 
+                batch: batchNum, 
+                status: contactResults.some(r => r.status === 'ERROR') ? 'PARTIAL_SUCCESS' : 'SUCCESS', 
+                details: `Processed ${contactResults.length} contacts.`,
+                contactResults 
+            });
+        }
+        
+        return new Response(JSON.stringify({ success: true, message: 'Deletion process completed.', logs }), {
+            status: 200, headers: { 'Content-Type': 'application/json' }
         });
 
     } catch (e) {
-        return new Response(JSON.stringify({ 
-            success: false, 
-            message: 'A critical error occurred during the deletion process.', 
-            error: e.message 
-        }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
+        return new Response(JSON.stringify({ success: false, message: e.message, logs }), {
+            status: 500, headers: { 'Content-Type': 'application/json' }
         });
     }
 }

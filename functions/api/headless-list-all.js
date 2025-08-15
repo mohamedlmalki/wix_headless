@@ -46,19 +46,24 @@ async function getContributorContactIds(project) {
 
         if (!contributorsResponse.ok) {
             console.warn("Could not fetch site contributors. Proceeding without this filter.");
-            return [];
+            return { contributorContactIds: [], ownerContactId: null };
         }
         
         const { contributors } = await contributorsResponse.json();
+        let ownerContactId = null;
         if (contributors) {
             contributors.forEach(c => {
                 if(c.contactId) contactIds.add(c.contactId);
+                if(c.role === 'OWNER') {
+                    ownerContactId = c.contactId;
+                }
             });
         }
+        return { contributorContactIds: Array.from(contactIds), ownerContactId };
     } catch (error) {
         console.error("Failed to get contributor contact IDs, proceeding without this filter.", error);
+        return { contributorContactIds: [], ownerContactId: null };
     }
-    return Array.from(contactIds);
 }
 
 export async function onRequestPost({ request, env }) {
@@ -72,7 +77,7 @@ export async function onRequestPost({ request, env }) {
       return new Response(JSON.stringify({ message: `Project not found for siteId: ${siteId}` }), { status: 404 });
     }
 
-    const [allMembers, contributorContactIds] = await Promise.all([
+    const [allMembers, { contributorContactIds, ownerContactId }] = await Promise.all([
         fetchAllMembers(project),
         getContributorContactIds(project)
     ]);
@@ -80,7 +85,7 @@ export async function onRequestPost({ request, env }) {
     // Filter out any member whose contactId matches a known contributor's contactId
     const filteredMembers = allMembers.filter(member => !contributorContactIds.includes(member.contactId));
 
-    return new Response(JSON.stringify({ members: filteredMembers }), {
+    return new Response(JSON.stringify({ members: filteredMembers, ownerContactId }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
