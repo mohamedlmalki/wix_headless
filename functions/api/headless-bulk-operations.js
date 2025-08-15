@@ -30,19 +30,18 @@ async function fetchAllMembers(project) {
   return allMembers;
 }
 
-// **CORRECTED FUNCTION USING THE RIGHT ENDPOINT**
 async function getContributorInfo(project) {
     const contributorContactIds = new Set();
     let ownerContactId = null;
     try {
-        // This is the correct endpoint, as derived from your working examples.
+        // This endpoint correctly fetches site contributors and their roles.
         const contributorsUrl = `https://www.wixapis.com/sites/v1/sites/${project.siteId}/contributors`;
         const contributorsResponse = await fetch(contributorsUrl, {
             headers: { 'Authorization': project.apiKey, 'wix-site-id': project.siteId }
         });
 
         if (!contributorsResponse.ok) {
-            console.warn("Could not fetch site contributors. Owner protection will be disabled.");
+            console.warn("Could not fetch site contributors. Owner protection will be disabled for this operation.");
             return { contributorContactIds: [], ownerContactId: null };
         }
         
@@ -81,7 +80,7 @@ export async function onRequestPost({ request, env }) {
                 getContributorInfo(project)
             ]);
             
-            // Filter out ALL contributors from the list
+            // Filter out ALL contributors from the list to protect them
             const filteredMembers = allMembers.filter(member => !contributorContactIds.includes(member.contactId));
             
             return new Response(JSON.stringify({ members: filteredMembers, ownerContactId }), {
@@ -92,9 +91,30 @@ export async function onRequestPost({ request, env }) {
         // --- ACTION: DELETE MEMBERS ---
         if (action === 'delete') {
             const logs = [];
+
+            // ★★★ FIX STARTS HERE ★★★
+            // 1. Fetch the owner's contact ID to ensure they are not deleted.
+            const { ownerContactId } = await getContributorInfo(project);
+
+            // 2. Filter the incoming list to remove the owner if they were included by mistake.
+            const safeMembersToDelete = membersToDelete.filter(member => {
+                if (ownerContactId && member.contactId === ownerContactId) {
+                    logs.push({ type: 'Protection', batch: 0, status: 'SKIPPED', details: `Skipped deletion of site owner: ${member.loginEmail}` });
+                    return false; // Exclude owner from deletion
+                }
+                return true; // Keep this member in the deletion list
+            });
+
+            if (safeMembersToDelete.length === 0) {
+                 return new Response(JSON.stringify({ success: true, message: 'Deletion process completed. No members were deleted as only the owner was selected.', logs }), {
+                    status: 200, headers: { 'Content-Type': 'application/json' }
+                });
+            }
+            // ★★★ FIX ENDS HERE ★★★
+
             const memberChunks = [];
-            for (let i = 0; i < membersToDelete.length; i += 100) {
-                memberChunks.push(membersToDelete.slice(i, i + 100));
+            for (let i = 0; i < safeMembersToDelete.length; i += 100) {
+                memberChunks.push(safeMembersToDelete.slice(i, i + 100));
             }
 
             for (let i = 0; i < memberChunks.length; i++) {
