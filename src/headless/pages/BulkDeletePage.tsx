@@ -80,14 +80,15 @@ const BulkDeletePage = () => {
         setMembers([]);
         setSelectedMembers([]);
         setOwnerContactId(null);
+        setLogs([]);
         try {
-            const response = await fetch(`/api/headless-list-all`, {
+            const response = await fetch(`/api/headless-bulk-operations`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId }),
+                body: JSON.stringify({ siteId: selectedProject.siteId, action: 'list' }),
             });
-            if (!response.ok) throw new Error('Failed to load members.');
             const data = await response.json();
+            if (!response.ok) throw new Error(data.message || 'Failed to load members.');
             setMembers(data.members || []);
             setOwnerContactId(data.ownerContactId || null);
         } catch (error: any) {
@@ -108,10 +109,14 @@ const BulkDeletePage = () => {
         const membersToDelete = members.filter(m => selectedMembers.includes(m.id));
 
         try {
-            const response = await fetch('/api/headless-start-delete-job', {
+            const response = await fetch('/api/headless-bulk-operations', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
+                body: JSON.stringify({ 
+                    siteId: selectedProject.siteId, 
+                    action: 'delete',
+                    membersToDelete 
+                }),
             });
 
             const result = await response.json();
@@ -163,7 +168,7 @@ const BulkDeletePage = () => {
                                 value={selectedProject?.siteId || ""} 
                                 onValueChange={(siteId) => {
                                     setSelectedProject(headlessProjects.find(p => p.siteId === siteId) || null);
-                                    setLogs([]); // Clear logs when changing project
+                                    setLogs([]);
                                 }}
                                 disabled={isDeleting}
                             >
