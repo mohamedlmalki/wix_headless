@@ -16,11 +16,10 @@ const makeApiRequest = async (url, options, body = null) => {
     try {
         return await response.json();
     } catch (e) {
-        return {}; // Return empty object if no JSON body, which is fine for DELETE requests
+        return {}; // Return empty object for successful DELETE requests with no body
     }
 };
 
-// Main function to handle the POST request
 export async function onRequestPost({ request, env }) {
     const { siteId, membersToDelete } = await request.json();
     const logs = [];
@@ -42,13 +41,11 @@ export async function onRequestPost({ request, env }) {
             }
         };
 
-        // Chunk members into batches of 100
         const memberChunks = [];
         for (let i = 0; i < membersToDelete.length; i += 100) {
             memberChunks.push(membersToDelete.slice(i, i + 100));
         }
 
-        // Process each chunk according to the specified logic
         for (let i = 0; i < memberChunks.length; i++) {
             const chunk = memberChunks[i];
             const batchNum = i + 1;
@@ -56,7 +53,7 @@ export async function onRequestPost({ request, env }) {
             // Step 1: Bulk delete member profiles
             const memberIdsInChunk = chunk.map(m => m.id);
             try {
-                // Using "member_ids" as the field name
+                // **THE FIX** Using "member_ids" as the field name
                 await makeApiRequest(
                     'https://www.wixapis.com/members/v1/members/bulk/delete', 
                     { ...defaultOptions, method: 'POST' }, 
@@ -65,7 +62,7 @@ export async function onRequestPost({ request, env }) {
                 logs.push({ type: 'Member Deletion', batch: batchNum, status: 'SUCCESS', details: `Bulk deleted ${memberIdsInChunk.length} member profiles.` });
             } catch (error) {
                 logs.push({ type: 'Member Deletion', batch: batchNum, status: 'ERROR', details: error.message });
-                throw new Error(`A critical error occurred during member deletion in batch ${batchNum}.`);
+                throw new Error(`Critical error during member deletion in batch ${batchNum}.`);
             }
 
             // Step 2: Wait for 1 second

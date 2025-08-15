@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/hooks/use-toast";
-import { Trash2, RefreshCw, Ban } from "lucide-react";
+import { Trash2, RefreshCw } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,6 @@ import { Progress } from "@/components/ui/progress";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
-// Define the shape of the data we'll be working with
 interface HeadlessProject {
   projectName: string;
   siteId: string;
@@ -33,11 +32,10 @@ interface Member {
 }
 
 interface LogEntry {
-    type: 'Member Deletion' | 'Contact Deletion';
+    type: string;
     batch: number;
-    status: 'SUCCESS' | 'ERROR' | 'PARTIAL_SUCCESS';
+    status: string;
     details: string;
-    contactResults?: { email: string; status: 'SUCCESS' | 'ERROR'; error?: string }[];
 }
 
 
@@ -49,14 +47,11 @@ const BulkDeletePage = () => {
     const [members, setMembers] = useState<Member[]>([]);
     const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
     const [filter, setFilter] = useState("");
-
-    // State for managing the deletion job
     const [isDeleting, setIsDeleting] = useState(false);
     const [deletionProgress, setDeletionProgress] = useState(0);
     const [deletionStatus, setDeletionStatus] = useState("");
     const [logs, setLogs] = useState<LogEntry[]>([]);
 
-    // Fetch projects on initial load
     useEffect(() => {
         const fetchProjects = async () => {
             try {
@@ -74,7 +69,6 @@ const BulkDeletePage = () => {
         fetchProjects();
     }, []);
 
-    // When a project is selected, fetch its members
     useEffect(() => {
         if (selectedProject) {
             handleLoadMembers();
@@ -86,6 +80,7 @@ const BulkDeletePage = () => {
         setIsLoadingMembers(true);
         setMembers([]);
         setSelectedMembers([]);
+        setOwnerContactId(null);
         try {
             const response = await fetch(`/api/headless-list-all`, {
                 method: 'POST',
@@ -95,7 +90,6 @@ const BulkDeletePage = () => {
             if (!response.ok) throw new Error('Failed to load members.');
             const data = await response.json();
             setMembers(data.members || []);
-            // Set the owner contact ID from the response
             setOwnerContactId(data.ownerContactId || null);
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -136,7 +130,7 @@ const BulkDeletePage = () => {
         } finally {
             setIsDeleting(false);
             setDeletionProgress(100);
-            handleLoadMembers(); // Refresh the list
+            handleLoadMembers();
         }
     };
 
@@ -170,7 +164,7 @@ const BulkDeletePage = () => {
                                 value={selectedProject?.siteId || ""} 
                                 onValueChange={(siteId) => {
                                     setSelectedProject(headlessProjects.find(p => p.siteId === siteId) || null);
-                                    setLogs([]); // Clear logs when changing project
+                                    setLogs([]);
                                 }}
                                 disabled={isDeleting}
                             >
@@ -188,7 +182,7 @@ const BulkDeletePage = () => {
                             <div className="flex justify-between items-center">
                                 <div>
                                     <CardTitle>Manage Members ({filteredMembers.length})</CardTitle>
-                                    <CardDescription>Select members to delete.</CardDescription>
+                                    <CardDescription>Select members to delete. The site owner is protected.</CardDescription>
                                 </div>
                                 <Input 
                                     placeholder="Filter members..."
@@ -270,7 +264,7 @@ const BulkDeletePage = () => {
                                         </AlertDialogHeader>
                                         <AlertDialogFooter>
                                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                            <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive hover:bg-destructive/90">
+                                            <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                                                 Yes, Delete
                                             </AlertDialogAction>
                                         </AlertDialogFooter>
