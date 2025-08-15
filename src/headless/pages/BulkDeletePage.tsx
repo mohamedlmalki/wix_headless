@@ -75,22 +75,13 @@ const BulkDeletePage = () => {
         fetchProjects();
     }, []);
 
-    // When a project is selected, fetch its members and owner info
+    // When a project is selected, fetch its members
     useEffect(() => {
         if (selectedProject) {
             handleLoadMembers();
-            fetchOwnerId(selectedProject.siteId);
         }
     }, [selectedProject]);
     
-    const fetchOwnerId = async (siteId: string) => {
-        // This function would call a backend endpoint to get the owner's contactId
-        // For now, it's a placeholder. The main logic is in the backend `list-all` file.
-        // You would typically have an endpoint like '/api/headless-get-owner'
-        setOwnerContactId(null); // Reset until a proper endpoint is implemented
-    };
-
-
     const handleLoadMembers = async () => {
         if (!selectedProject) return;
         setIsLoadingMembers(true);
@@ -105,7 +96,6 @@ const BulkDeletePage = () => {
             if (!response.ok) throw new Error('Failed to load members.');
             const data = await response.json();
             setMembers(data.members || []);
-            toast({ title: "Success", description: `Loaded ${data.members?.length || 0} members.`});
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
         } finally {
@@ -132,7 +122,8 @@ const BulkDeletePage = () => {
             });
 
             const result = await response.json();
-            setLogs(result.logs || []);
+            // *** THE FIX IS HERE: Ensure logs are always set from the result ***
+            setLogs(result.logs || [{ type: 'Member Deletion', batch: 1, status: 'ERROR', details: 'No logs returned from server.' }]);
             
             if (!response.ok || !result.success) {
                 throw new Error(result.error || 'Deletion job failed.');
@@ -146,7 +137,7 @@ const BulkDeletePage = () => {
         } finally {
             setIsDeleting(false);
             setDeletionProgress(100);
-            handleLoadMembers(); // Refresh the list
+            handleLoadMembers();
         }
     };
 
@@ -182,7 +173,10 @@ const BulkDeletePage = () => {
                         <CardContent className="flex items-center gap-4">
                             <Select 
                                 value={selectedProject?.siteId || ""} 
-                                onValueChange={(siteId) => setSelectedProject(headlessProjects.find(p => p.siteId === siteId) || null)}
+                                onValueChange={(siteId) => {
+                                    setSelectedProject(headlessProjects.find(p => p.siteId === siteId) || null);
+                                    setLogs([]); // Clear logs when changing project
+                                }}
                                 disabled={isDeleting}
                             >
                                 <SelectTrigger><SelectValue placeholder="Select a project..." /></SelectTrigger>
@@ -280,7 +274,8 @@ const BulkDeletePage = () => {
                     </Card>
 
                     {/* Deletion Job Status and Logs */}
-                    {(isDeleting || logs.length > 0) && (
+                    {/* *** THE FIX IS HERE: Changed condition to logs.length > 0 *** */}
+                    {logs.length > 0 && (
                          <Card>
                             <CardHeader><CardTitle>Deletion Job Status</CardTitle></CardHeader>
                             <CardContent className="space-y-4">
@@ -290,7 +285,7 @@ const BulkDeletePage = () => {
                                         <p className="text-sm text-muted-foreground mt-2">{deletionStatus}</p>
                                     </div>
                                 )}
-                                <Accordion type="single" collapsible className="w-full">
+                                <Accordion type="single" collapsible className="w-full" defaultValue="logs">
                                     <AccordionItem value="logs">
                                         <AccordionTrigger>View Detailed Logs</AccordionTrigger>
                                         <AccordionContent className="max-h-60 overflow-y-auto">
