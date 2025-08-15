@@ -2,6 +2,7 @@
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper function to make a generic, authenticated request to the Wix API
 const makeWixApiRequest = async (url, project, method = 'GET', body = null) => {
     const options = {
         method: method,
@@ -19,7 +20,6 @@ const makeWixApiRequest = async (url, project, method = 'GET', body = null) => {
         const errorText = await response.text();
         throw new Error(`Wix API Error: Status ${response.status} - ${errorText}`);
     }
-    // For DELETE requests that might not have a body, we handle it gracefully
     if (response.status === 204 || response.headers.get('content-length') === '0') {
         return {};
     }
@@ -27,6 +27,7 @@ const makeWixApiRequest = async (url, project, method = 'GET', body = null) => {
 };
 
 const getOwnerInfo = async (project, allMembers, logs) => {
+    // This function remains the same, providing the robust owner check.
     let ownerContactId = null;
     logs.push({ type: 'Owner Check', status: 'IN_PROGRESS', details: 'Attempting to identify owner via Contributors API...' });
     try {
@@ -74,6 +75,7 @@ export async function onRequestPost({ request, env }) {
         if (!project) return new Response(JSON.stringify({ message: "Project not found", logs }), { status: 404 });
 
         if (action === 'list') {
+            // ... The 'list' action remains the same ...
             logs.push({ type: 'Setup', status: 'IN_PROGRESS', details: 'Fetching all site members...' });
             const allMembersData = await makeWixApiRequest(`https://www.wixapis.com/members/v1/members?fieldsets=FULL&paging.limit=1000`, project, 'GET');
             const allMembers = allMembersData.members || [];
@@ -108,28 +110,40 @@ export async function onRequestPost({ request, env }) {
                 return new Response(JSON.stringify({ success: true, message: 'No members to delete.', logs }), { status: 200 });
             }
             
-            // ★★★ FIX: Switched from bulk delete to a one-by-one loop ★★★
-            logs.push({ type: 'Deletion', status: 'IN_PROGRESS', details: `Step 1 of 2: Deleting ${safeMembersToDelete.length} member profiles individually...` });
-            for (const member of safeMembersToDelete) {
-                try {
-                    await makeWixApiRequest(`https://www.wixapis.com/members/v1/members/${member.id}`, project, 'DELETE');
-                } catch (error) {
-                    logs.push({ type: 'Deletion', status: 'WARNING', details: `Failed to delete member profile for ${member.loginEmail}: ${error.message}` });
-                }
+            // ★★★ BATCHING LOGIC UPDATE ★★★
+            const memberChunks = [];
+            for (let i = 0; i < safeMembersToDelete.length; i += 100) {
+                memberChunks.push(safeMembersToDelete.slice(i, i + 100));
             }
-            logs.push({ type: 'Deletion', status: 'SUCCESS', details: 'Step 1 of 2: Member profile deletion process finished.' });
 
-            await delay(1000);
-
-            logs.push({ type: 'Deletion', status: 'IN_PROGRESS', details: 'Step 2 of 2: Deleting associated contacts...' });
-            for (const member of safeMembersToDelete) {
+            for (let i = 0; i < memberChunks.length; i++) {
+                const chunk = memberChunks[i];
+                const batchNum = i + 1;
+                
+                // Log for Member Deletion Batch
                 try {
-                    await makeWixApiRequest(`https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`, project, 'DELETE');
+                    const memberIdsToDelete = chunk.map(m => m.id);
+                    await makeWixApiRequest('https://www.wixapis.com/members/v1/members/bulk/delete', project, 'POST', { member_ids: memberIdsToDelete });
+                    logs.push({ type: 'Member Profile Deletion', batch: batchNum, status: 'SUCCESS', details: `Deleted ${chunk.length} member profiles.`, members: chunk });
                 } catch (error) {
-                    logs.push({ type: 'Deletion', status: 'WARNING', details: `Failed to delete contact for ${member.loginEmail}: ${error.message}` });
+                    logs.push({ type: 'Member Profile Deletion', batch: batchNum, status: 'FAILED', details: error.message, members: chunk });
                 }
+
+                await delay(500);
+
+                // Log for Contact Deletion Batch
+                const contactLog = { type: 'Contact Deletion', batch: batchNum, status: 'COMPLETED', details: `Processed ${chunk.length} contacts.`, members: chunk, contactResults: [] };
+                for (const member of chunk) {
+                    try {
+                        await makeWixApiRequest(`https://www.wixapis.com/contacts/v4/contacts/${member.contactId}`, project, 'DELETE');
+                        contactLog.contactResults.push({ email: member.loginEmail, status: 'SUCCESS' });
+                    } catch (error) {
+                        contactLog.contactResults.push({ email: member.loginEmail, status: 'ERROR', error: error.message });
+                    }
+                }
+                logs.push(contactLog);
             }
-            logs.push({ type: 'Deletion', status: 'SUCCESS', details: 'Step 2 of 2: Contact deletion process finished.' });
+
             logs.push({ type: 'Job End', status: 'SUCCESS', details: 'Bulk delete operation completed.' });
             
             return new Response(JSON.stringify({ success: true, message: 'Bulk delete operation completed.', logs }), { status: 200 });
