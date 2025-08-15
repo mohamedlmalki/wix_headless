@@ -68,13 +68,16 @@ const BulkDeletePage = () => {
         fetchProjects();
     }, []);
 
+    // ★★★ FIX: This useEffect now triggers the single, safe data-loading function. ★★★
     useEffect(() => {
         if (selectedProject) {
-            handleLoadMembers();
+            handleLoadMembersAndOwner();
         }
     }, [selectedProject]);
     
-    const handleLoadMembers = async () => {
+    // ★★★ FIX: This is now the ONLY function that fetches member data. ★★★
+    // It calls the backend 'list' action which securely filters out the owner.
+    const handleLoadMembersAndOwner = async () => {
         if (!selectedProject) return;
         setIsLoadingMembers(true);
         setMembers([]);
@@ -89,8 +92,11 @@ const BulkDeletePage = () => {
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.message || 'Failed to load members.');
+            
+            // The backend now provides the pre-filtered member list and the owner's ID
             setMembers(data.members || []);
             setOwnerContactId(data.ownerContactId || null);
+
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
         } finally {
@@ -115,7 +121,7 @@ const BulkDeletePage = () => {
                 body: JSON.stringify({ 
                     siteId: selectedProject.siteId, 
                     action: 'delete',
-                    membersToDelete 
+                    membersToDelete // This list is already safe because the owner was filtered out
                 }),
             });
 
@@ -134,12 +140,14 @@ const BulkDeletePage = () => {
         } finally {
             setIsDeleting(false);
             setDeletionProgress(100);
-            handleLoadMembers();
+            // Reload the member list after deletion is complete
+            handleLoadMembersAndOwner();
         }
     };
 
     const handleSelectAll = (checked: boolean) => {
-        setSelectedMembers(checked ? filteredMembers.filter(m => m.contactId !== ownerContactId).map(m => m.id) : []);
+        // The filteredMembers list already excludes the owner, so this is safe.
+        setSelectedMembers(checked ? filteredMembers.map(m => m.id) : []);
     };
     
     const filteredMembers = members.filter(member =>
@@ -186,7 +194,7 @@ const BulkDeletePage = () => {
                             <div className="flex justify-between items-center">
                                 <div>
                                     <CardTitle>Manage Members ({filteredMembers.length})</CardTitle>
-                                    <CardDescription>Select members to delete. The site owner is protected.</CardDescription>
+                                    <CardDescription>Select members to delete. Site contributors are protected and hidden from this list.</CardDescription>
                                 </div>
                                 <Input 
                                     placeholder="Filter members..."
@@ -203,7 +211,7 @@ const BulkDeletePage = () => {
                                         <TableRow>
                                             <TableHead className="w-[50px]">
                                                 <Checkbox
-                                                    checked={filteredMembers.length > 0 && selectedMembers.length > 0 && selectedMembers.length === filteredMembers.filter(m => m.contactId !== ownerContactId).length}
+                                                    checked={filteredMembers.length > 0 && selectedMembers.length > 0 && selectedMembers.length === filteredMembers.length}
                                                     onCheckedChange={(checked) => handleSelectAll(Boolean(checked))}
                                                 />
                                             </TableHead>
@@ -214,37 +222,25 @@ const BulkDeletePage = () => {
                                     </TableHeader>
                                     <TableBody>
                                         {isLoadingMembers ? (
-                                            <TableRow><TableCell colSpan={4} className="h-24 text-center">Loading members...</TableCell></TableRow>
+                                            <TableRow><TableCell colSpan={4} className="h-24 text-center">Loading and filtering members...</TableCell></TableRow>
                                         ) : filteredMembers.length > 0 ? (
-                                            filteredMembers.map(member => {
-                                                const isOwner = member.contactId === ownerContactId;
-                                                return (
-                                                <TableRow key={member.id} className={isOwner ? "opacity-50" : ""}>
+                                            filteredMembers.map(member => (
+                                                <TableRow key={member.id}>
                                                     <TableCell>
-                                                        <TooltipProvider>
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <span tabIndex={0}>
-                                                                        <Checkbox 
-                                                                            checked={selectedMembers.includes(member.id)}
-                                                                            onCheckedChange={(checked) => {
-                                                                                setSelectedMembers(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
-                                                                            }}
-                                                                            disabled={isOwner}
-                                                                        />
-                                                                    </span>
-                                                                </TooltipTrigger>
-                                                                {isOwner && <TooltipContent><p>Site owner cannot be deleted.</p></TooltipContent>}
-                                                            </Tooltip>
-                                                        </TooltipProvider>
+                                                        <Checkbox 
+                                                            checked={selectedMembers.includes(member.id)}
+                                                            onCheckedChange={(checked) => {
+                                                                setSelectedMembers(prev => checked ? [...prev, member.id] : prev.filter(id => id !== member.id));
+                                                            }}
+                                                        />
                                                     </TableCell>
                                                     <TableCell>{member.profile?.nickname || 'N/A'}</TableCell>
                                                     <TableCell>{member.loginEmail}</TableCell>
                                                     <TableCell><Badge variant="outline">{member.status}</Badge></TableCell>
                                                 </TableRow>
-                                            )})
+                                            ))
                                         ) : (
-                                            <TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">No members found.</TableCell></TableRow>
+                                            <TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">No deletable members found.</TableCell></TableRow>
                                         )}
                                     </TableBody>
                                 </Table>
