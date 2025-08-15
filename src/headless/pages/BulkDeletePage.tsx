@@ -1,6 +1,6 @@
 // src/headless/pages/BulkDeletePage.tsx
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -74,7 +74,7 @@ const BulkDeletePage = () => {
         fetchProjects();
     }, []);
 
-    // When a project is selected, fetch its members
+    // When a project is selected, fetch its members and owner info
     useEffect(() => {
         if (selectedProject) {
             handleLoadMembers();
@@ -95,10 +95,7 @@ const BulkDeletePage = () => {
             if (!response.ok) throw new Error('Failed to load members.');
             const data = await response.json();
             setMembers(data.members || []);
-            // Set the owner contact ID from the response if available
-            if (data.ownerContactId) {
-                setOwnerContactId(data.ownerContactId);
-            }
+            setOwnerContactId(data.ownerContactId || null);
         } catch (error: any) {
             toast({ title: "Error", description: error.message, variant: "destructive" });
         } finally {
@@ -124,7 +121,7 @@ const BulkDeletePage = () => {
             });
 
             const result = await response.json();
-            setLogs(result.logs || []);
+            setLogs(result.logs || [{ type: 'Member Deletion', batch: 1, status: 'ERROR', details: 'No logs returned from server.' }]);
             
             if (!response.ok || !result.success) {
                 throw new Error(result.error || 'Deletion job failed.');
@@ -272,7 +269,7 @@ const BulkDeletePage = () => {
                                         </AlertDialogHeader>
                                         <AlertDialogFooter>
                                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                            <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                            <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive hover:bg-destructive/90">
                                                 Yes, Delete
                                             </AlertDialogAction>
                                         </AlertDialogFooter>

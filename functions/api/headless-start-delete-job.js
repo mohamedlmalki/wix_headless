@@ -54,7 +54,7 @@ export async function onRequestPost({ request, env }) {
             const batchNum = i + 1;
             
             // Step 1: Bulk delete member profiles
-            const memberIdsInChunk = chunk.map(m => m.memberId);
+            const memberIdsInChunk = chunk.map(m => m.id);
             try {
                 // *** THE FIX IS HERE: Using "member_ids" as the field name ***
                 await makeApiRequest(

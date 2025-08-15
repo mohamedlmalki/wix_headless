@@ -36,8 +36,9 @@ async function fetchAllMembers(project) {
 }
 
 // Fetches all contributors (admins, owners, etc.) for a site
-async function getContributorContactIds(project) {
+async function getContributorInfo(project) {
     const contactIds = new Set();
+    let ownerContactId = null;
     try {
         const contributorsUrl = `https://www.wixapis.com/sites/v1/sites/${project.siteId}/contributors`;
         const contributorsResponse = await fetch(contributorsUrl, {
@@ -50,7 +51,6 @@ async function getContributorContactIds(project) {
         }
         
         const { contributors } = await contributorsResponse.json();
-        let ownerContactId = null;
         if (contributors) {
             contributors.forEach(c => {
                 if(c.contactId) contactIds.add(c.contactId);
@@ -59,11 +59,10 @@ async function getContributorContactIds(project) {
                 }
             });
         }
-        return { contributorContactIds: Array.from(contactIds), ownerContactId };
     } catch (error) {
         console.error("Failed to get contributor contact IDs, proceeding without this filter.", error);
-        return { contributorContactIds: [], ownerContactId: null };
     }
+    return { contributorContactIds: Array.from(contactIds), ownerContactId };
 }
 
 export async function onRequestPost({ request, env }) {
@@ -79,7 +78,7 @@ export async function onRequestPost({ request, env }) {
 
     const [allMembers, { contributorContactIds, ownerContactId }] = await Promise.all([
         fetchAllMembers(project),
-        getContributorContactIds(project)
+        getContributorInfo(project)
     ]);
 
     // Filter out any member whose contactId matches a known contributor's contactId
