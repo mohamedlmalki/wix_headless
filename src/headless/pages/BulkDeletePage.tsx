@@ -81,10 +81,10 @@ const BulkDeletePage = () => {
         setSelectedMembers([]);
         setOwnerContactId(null);
         try {
-            const response = await fetch(`/api/headless-bulk-operations`, {
+            const response = await fetch(`/api/headless-list-all`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ siteId: selectedProject.siteId, action: 'list' }),
+                body: JSON.stringify({ siteId: selectedProject.siteId }),
             });
             if (!response.ok) throw new Error('Failed to load members.');
             const data = await response.json();
@@ -108,14 +108,10 @@ const BulkDeletePage = () => {
         const membersToDelete = members.filter(m => selectedMembers.includes(m.id));
 
         try {
-            const response = await fetch('/api/headless-bulk-operations', {
+            const response = await fetch('/api/headless-start-delete-job', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    siteId: selectedProject.siteId, 
-                    action: 'delete',
-                    membersToDelete 
-                }),
+                body: JSON.stringify({ siteId: selectedProject.siteId, membersToDelete }),
             });
 
             const result = await response.json();
@@ -267,7 +263,7 @@ const BulkDeletePage = () => {
                                         </AlertDialogHeader>
                                         <AlertDialogFooter>
                                             <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                            <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                                            <AlertDialogAction onClick={handleStartDeletion} className="bg-destructive hover:bg-destructive/90">
                                                 Yes, Delete
                                             </AlertDialogAction>
                                         </AlertDialogFooter>
